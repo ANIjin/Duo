@@ -201,7 +201,7 @@ final class DuoClient: NSObject {
         guard blockStatus == kCMBlockBufferNoErr, let block else { return }
         let copyStatus = avcc.withUnsafeBytes { bytes -> OSStatus in
             guard let baseAddress = bytes.baseAddress else {
-                return OSStatus(paramErr)
+                return OSStatus(-50)
             }
             return CMBlockBufferReplaceDataBytes(
                 with: baseAddress,
