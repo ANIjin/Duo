@@ -26,7 +26,6 @@ final class DuoViewController: UIViewController {
         ])
         videoLayer.videoGravity = .resize
         videoLayer.frame = view.bounds
-        videoLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer.addSublayer(videoLayer)
         statusLabel.textColor = .white
         statusLabel.textAlignment = .center
@@ -54,6 +53,11 @@ final class DuoViewController: UIViewController {
         } catch {
             statusLabel.text = error.localizedDescription
         }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        videoLayer.frame = view.bounds
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
