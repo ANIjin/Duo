@@ -72,6 +72,8 @@ final class DuoClient: NSObject {
     var onStatus: ((String) -> Void)?
     private var h264Format: CMVideoFormatDescription?
     private var codec: DuoCodec = .jpeg
+    private var lastKeyframeRequest = Date.distantPast
+    private var presentedFrames: Int64 = 0
 
     private enum DuoCodec {
         case jpeg, h264
@@ -146,41 +148,53 @@ final class DuoClient: NSObject {
         }
     }
 
-    private func decodeH264(_ annexB: Data, timestampNs: UInt64) {
+    private func applyParameterSets(_ annexB: Data) {
         let nalUnits = splitAnnexB(annexB)
-        var sps: Data?
-        var pps: Data?
-        for nal in nalUnits {
-            guard let type = nal.first.map({ $0 & 0x1F }) else { continue }
-            if type == 7 { sps = nal }
-            if type == 8 { pps = nal }
-        }
-        if h264Format == nil, let sps, let pps {
-            var description: CMVideoFormatDescription?
-            let status = sps.withUnsafeBytes { spsBytes in
-                pps.withUnsafeBytes { ppsBytes in
-                    let pointers = [
-                        spsBytes.bindMemory(to: UInt8.self).baseAddress!,
-                        ppsBytes.bindMemory(to: UInt8.self).baseAddress!,
-                    ]
-                    let sizes = [sps.count, pps.count]
-                    return CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                        allocator: kCFAllocatorDefault,
-                        parameterSetCount: 2,
-                        parameterSetPointers: pointers,
-                        parameterSetSizes: sizes,
-                        nalUnitHeaderLength: 4,
-                        formatDescriptionOut: &description
-                    )
-                }
+        let sps = nalUnits.first { ($0.first ?? 0) & 0x1F == 7 }
+        let pps = nalUnits.first { ($0.first ?? 0) & 0x1F == 8 }
+        guard let sps, let pps else { return }
+        var description: CMVideoFormatDescription?
+        let status = sps.withUnsafeBytes { spsBytes in
+            pps.withUnsafeBytes { ppsBytes in
+                let pointers = [
+                    spsBytes.bindMemory(to: UInt8.self).baseAddress!,
+                    ppsBytes.bindMemory(to: UInt8.self).baseAddress!,
+                ]
+                let sizes = [sps.count, pps.count]
+                return CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                    allocator: kCFAllocatorDefault,
+                    parameterSetCount: 2,
+                    parameterSetPointers: pointers,
+                    parameterSetSizes: sizes,
+                    nalUnitHeaderLength: 4,
+                    formatDescriptionOut: &description
+                )
             }
-            guard status == noErr, let description else { return }
+        }
+        if status == noErr, let description {
             h264Format = description
         }
-        guard let format = h264Format else { return }
+    }
+
+    func requestKeyframe() {
+        let now = Date()
+        guard now.timeIntervalSince(lastKeyframeRequest) >= 0.5 else { return }
+        lastKeyframeRequest = now
+        send(DuoFrame(type: .keyframeRequest, flags: 0, payload: Data()))
+    }
+
+    private func decodeH264(_ annexB: Data, timestampNs _: UInt64) {
+        let nalUnits = splitAnnexB(annexB)
+        if h264Format == nil {
+            applyParameterSets(annexB)
+        }
+        guard let format = h264Format else {
+            requestKeyframe()
+            return
+        }
         var avcc = Data()
         for nal in nalUnits {
-            guard let type = nal.first.map({ $0 & 0x1F }), type != 7, type != 8 else { continue }
+            guard let type = nal.first.map({ $0 & 0x1F }), type == 1 || type == 5 else { continue }
             var length = UInt32(nal.count).bigEndian
             avcc.append(Data(bytes: &length, count: 4))
             avcc.append(nal)
@@ -211,9 +225,10 @@ final class DuoClient: NSObject {
             )
         }
         guard copyStatus == kCMBlockBufferNoErr else { return }
+        presentedFrames += 1
         var timing = CMSampleTimingInfo(
             duration: CMTime(value: 1, timescale: 60),
-            presentationTimeStamp: CMTime(value: CMTimeValue(timestampNs), timescale: 1_000_000_000),
+            presentationTimeStamp: CMTime(value: presentedFrames, timescale: 60),
             decodeTimeStamp: .invalid
         )
         var sample: CMSampleBuffer?
@@ -228,9 +243,21 @@ final class DuoClient: NSObject {
             sampleSizeArray: [avcc.count],
             sampleBufferOut: &sample
         )
-        if sampleStatus == noErr, let sample {
-            DispatchQueue.main.async { self.onSampleBuffer?(sample) }
+        guard sampleStatus == noErr, let sample else {
+            requestKeyframe()
+            return
         }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0,
+           let raw = CFArrayGetValueAtIndex(attachments, 0) {
+            let dictionary = Unmanaged<CFMutableDictionary>.fromOpaque(raw).takeUnretainedValue()
+            CFDictionarySetValue(
+                dictionary,
+                Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
+            )
+        }
+        DispatchQueue.main.async { self.onSampleBuffer?(sample) }
     }
 
     private func splitAnnexB(_ data: Data) -> [Data] {
@@ -277,6 +304,15 @@ final class DuoClient: NSObject {
             } else if codec == 2 {
                 self.codec = .h264
                 self.h264Format = nil
+                if frame.payload.count > 11 {
+                    let parameterLength = frame.payload.subdata(in: 7..<11).reduce(UInt32(0)) {
+                        ($0 << 8) | UInt32($1)
+                    }
+                    let available = frame.payload.count - 11
+                    if parameterLength > 0, available >= Int(parameterLength) {
+                        applyParameterSets(frame.payload.subdata(in: 11..<(11 + Int(parameterLength))))
+                    }
+                }
                 setStatus("Streaming H.264")
             }
 

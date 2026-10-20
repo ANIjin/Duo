@@ -1,4 +1,4 @@
-"""Runnable Windows host for the Duo JPEG-over-usbmux prototype."""
+"""Runnable Windows host for the Duo H.264-over-usbmux prototype."""
 
 from __future__ import annotations
 
@@ -21,6 +21,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--monitor-index", type=int, default=1)
     parser.add_argument("--max-fps", type=int, default=60)
     parser.add_argument("--jpeg-quality", type=int, default=40)
+    parser.add_argument(
+        "--codec",
+        choices=("h264", "jpeg"),
+        default="h264",
+        help="Codec to use; H.264 is required by default for stable 60 fps.",
+    )
     parser.add_argument("--driver-name", default="Virtual Display Driver")
     parser.add_argument("--once", action="store_true", help="Exit after the first disconnect")
     return parser
@@ -50,7 +56,11 @@ def run(args: argparse.Namespace) -> int:
 
 
 def stream_session(transport, args: argparse.Namespace) -> int:
-    controller = HostController(VirtualMonitor(args.driver_name), args.max_fps)
+    controller = HostController(
+        VirtualMonitor(args.driver_name),
+        args.max_fps,
+        codec_preference=args.codec,
+    )
     parser = FrameStream()
     try:
         deadline = time.monotonic() + 5
@@ -64,11 +74,12 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                     raise ProtocolError("The first iPad message must be HELLO")
                 hello = Hello.decode(frame.payload)
                 LOG.info(
-                    "iPad HELLO: %sx%s @ %s fps (scale %.2f)",
+                    "iPad HELLO: %sx%s @ %s fps (scale %.2f) codecs %s",
                     hello.width,
                     hello.height,
                     hello.max_fps,
                     hello.scale,
+                    ",".join(codec.name for codec in hello.codecs) or "none",
                 )
                 break
         if hello is None:
@@ -80,13 +91,22 @@ def stream_session(transport, args: argparse.Namespace) -> int:
         if config.codec.name == "H264":
             encoder = FfmpegEncoder(config.width, config.height, config.fps)
             LOG.info("Using H.264 encoder %s", encoder.encoder)
+            if encoder.warning:
+                LOG.warning("%s", encoder.warning)
+            controller.announce_parameter_sets(encoder.parameter_sets)
         else:
             encoder = JpegEncoder(args.jpeg_quality)
         last_metrics = time.monotonic()
         try:
             for image in capture.frames(config.fps):
-                encoded = encoder.encode(image)
-                controller.send_frame(encoded)
+                capture_ns = time.monotonic_ns()
+                encoded = encoder.encode(image, keyframe=controller.consume_keyframe_request())
+                if encoded is None:
+                    controller.tick()
+                    continue
+                if isinstance(encoder, FfmpegEncoder):
+                    controller.announce_parameter_sets(encoder.parameter_sets)
+                controller.send_frame(encoded, capture_ns)
                 controller.tick()
                 if controller.sender is not None and time.monotonic() - last_metrics >= 2:
                     metrics = controller.sender.telemetry.snapshot()

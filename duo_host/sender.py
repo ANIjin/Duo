@@ -21,12 +21,10 @@ class FrameSender:
         self.refresh_interval = 2.0
 
     def submit(self, encoded: EncodedFrame, capture_timestamp_ns: int | None = None) -> None:
-        if self.force_keyframe:
-            encoded = EncodedFrame(encoded.data, True)
-            self.force_keyframe = False
+        dropped_before = self.pending.dropped
         self.pending.put(encoded)
         self._last = encoded
-        if self.pending.dropped:
+        if self.pending.dropped > dropped_before:
             self.force_keyframe = True
             self.telemetry.dropped_frames = self.pending.dropped
 
@@ -38,9 +36,6 @@ class FrameSender:
             encoded = self._last
         if encoded is None:
             return False
-        if self.force_keyframe:
-            encoded = EncodedFrame(encoded.data, True)
-            self.force_keyframe = False
         timestamp = time.monotonic_ns() if capture_timestamp_ns is None else capture_timestamp_ns
         flags = FRAME_FLAG_KEYFRAME if encoded.keyframe else 0
         payload = VideoFrame(timestamp, encoded.data).encode()

@@ -48,7 +48,8 @@ on macOS for signing and device testing.
    The default driver name is `Virtual Display Driver` (MikeTheTech's driver).
    Use `--driver-name` if a different IddCx driver is installed.
    Use `--monitor-index` if the virtual monitor is not Windows display index 1.
-   JPEG quality defaults to 40 to reduce USB latency; increase it if image
+   H.264 is required by default for stable 60 fps. JPEG quality defaults to 40
+   only when using the fallback; increase it if image
    quality is more important than responsiveness:
 
    ```powershell
@@ -64,10 +65,12 @@ on macOS for signing and device testing.
    monitor's configured refresh rate. A 60 Hz monitor can show less than 60
    streamed frames per second if JPEG encoding or USB transfer is the
    bottleneck.
-   The host uses H.264 automatically when `ffmpeg` is installed and the iPad
-   advertises H.264. Install an FFmpeg build that includes `h264_amf` for the
-   AMD GPU (or `libx264` as a software fallback), then restart the host. If
-   FFmpeg is unavailable, the host intentionally falls back to JPEG.
+   The host requires H.264 when the iPad advertises it. Reinstall the runtime
+   extra so PyAV is available (`python -m pip install -e ".[runtime]"`). The
+   host uses `h264_amf` on this AMD GPU when PyAV can open it, and otherwise
+   falls back to another hardware encoder or `libx264`. If no encoder opens,
+   the host stops with an actionable error instead of silently switching to
+   the slow JPEG path. Use `--codec jpeg` only to explicitly select the fallback.
    On Windows, one option is:
 
    ```powershell
@@ -76,9 +79,12 @@ on macOS for signing and device testing.
 
    Open a new PowerShell window afterward and verify `ffmpeg -encoders`
    lists `h264_amf` or `libx264`.
-   The startup log includes the iPad HELLO dimensions. With the current iPad
-   build it should say `2360x1640`; if it says `2048x1536`, rebuild and
-   sideload the latest IPA because that is an older client build.
+   The startup log includes the iPad HELLO dimensions and advertised codecs.
+   It should list `H264`. A HELLO of `2048x1536` means iPadOS is running the
+   app in compatibility mode or an older build is installed. The current
+   Info.plist includes a launch screen so a rebuilt app reports the panel's
+   native pixels (2360x1640 on a 10th-generation iPad). Rebuild and sideload
+   after pulling these client changes; the host cannot update the app on the iPad.
    Use `--once` to exit instead of retrying when the iPad is unavailable.
 
 If the host reports a usbmux import error, install the runtime package into

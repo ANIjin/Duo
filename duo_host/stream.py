@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import io
-import queue
-import shutil
-import subprocess
-from threading import Lock, Thread
 from threading import Lock
 from typing import Protocol
 
@@ -56,7 +52,7 @@ class JpegEncoder:
             raise ValueError("JPEG quality must be between 20 and 95")
         self.quality = quality
 
-    def encode(self, image) -> EncodedFrame:
+    def encode(self, image, keyframe: bool = False) -> EncodedFrame:
         try:
             from PIL import Image
         except ImportError as error:
@@ -78,122 +74,173 @@ class JpegEncoder:
         return EncodedFrame(output.getvalue(), True)
 
 
+def annexb_parameter_sets(extradata: bytes) -> bytes:
+    """Return Annex B SPS/PPS bytes from Annex B or AVCC encoder extradata."""
+
+    if extradata.startswith((b"\x00\x00\x00\x01", b"\x00\x00\x01")):
+        return extradata
+    if not extradata or extradata[0] != 1 or len(extradata) < 7:
+        return b""
+    offset = 5
+    nal_count = extradata[offset] & 0x1F
+    offset += 1
+    nal_units: list[bytes] = []
+    for _ in range(nal_count):
+        if offset + 2 > len(extradata):
+            return b""
+        length = int.from_bytes(extradata[offset : offset + 2], "big")
+        offset += 2
+        if length <= 0 or offset + length > len(extradata):
+            return b""
+        nal_units.append(extradata[offset : offset + length])
+        offset += length
+    if offset >= len(extradata):
+        return b""
+    nal_count = extradata[offset]
+    offset += 1
+    for _ in range(nal_count):
+        if offset + 2 > len(extradata):
+            return b""
+        length = int.from_bytes(extradata[offset : offset + 2], "big")
+        offset += 2
+        if length <= 0 or offset + length > len(extradata):
+            return b""
+        nal_units.append(extradata[offset : offset + length])
+        offset += length
+    return b"".join(b"\x00\x00\x00\x01" + nal for nal in nal_units)
+
+
 class FfmpegEncoder:
-    """Persistent low-latency H.264 encoder using the first available FFmpeg encoder."""
+    """Low-latency H.264 encoder. Hardware encoders are preferred over x264."""
 
     codec = Codec.H264
     candidates = ("h264_amf", "h264_nvenc", "h264_qsv", "libx264")
 
-    def __init__(self, width: int, height: int, fps: int) -> None:
-        if shutil.which("ffmpeg") is None:
-            raise EncoderError("FFmpeg is required for H.264 encoding")
-        self.width, self.height, self.fps = width, height, fps
-        self.encoder = self._select_encoder()
-        encoder_options = {
-            "h264_amf": ["-usage", "ultralowlatency", "-quality", "speed", "-b:v", "20M"],
-            "h264_nvenc": ["-preset", "p1", "-tune", "ull", "-rc", "cbr", "-b:v", "20M"],
-            "h264_qsv": ["-preset", "veryfast", "-look_ahead", "0", "-b:v", "20M"],
-            "libx264": ["-preset", "ultrafast", "-tune", "zerolatency"],
-        }[self.encoder]
-        self._process = subprocess.Popen(
-            [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-f", "rawvideo", "-pix_fmt", "bgr24",
-                "-s", f"{width}x{height}", "-r", str(fps), "-i", "pipe:0",
-                "-an", "-c:v", self.encoder, *encoder_options, "-bf", "0", "-g", str(fps),
-                "-pix_fmt", "yuv420p", "-bsf:v", "h264_metadata=aud=insert",
-                "-f", "h264", "pipe:1",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-        )
-        self._output = queue.Queue()
-        self._buffer = bytearray()
-        self._access_unit = bytearray()
-        self._reader = Thread(target=self._read_output, daemon=True, name="duo-h264-reader")
-        self._reader.start()
+    def __init__(self, width: int, height: int, fps: int, bitrate: int = 20_000_000) -> None:
+        if width % 2 or height % 2:
+            raise EncoderError(f"H.264 requires even dimensions, got {width}x{height}")
+        if fps <= 0 or bitrate <= 0:
+            raise EncoderError("H.264 fps and bitrate must be positive")
+        self.width, self.height, self.fps, self.bitrate = width, height, fps, bitrate
+        self._context, self.encoder = self._open()
+        self._pts = 0
+        self.parameter_sets = annexb_parameter_sets(bytes(self._context.extradata or b""))
 
-    @staticmethod
-    def _start_code(data: bytes, offset: int = 0) -> int:
-        for index in range(offset, len(data) - 3):
-            if data[index:index + 4] == b"\x00\x00\x00\x01":
-                return index
-            if data[index:index + 3] == b"\x00\x00\x01":
-                return index
-        return -1
-
-    @staticmethod
-    def _nal_type(nal: bytes) -> int:
-        prefix = 4 if nal.startswith(b"\x00\x00\x00\x01") else 3
-        return nal[prefix] & 0x1F
-
-    def _read_output(self) -> None:
-        assert self._process.stdout is not None
-        while True:
-            chunk = self._process.stdout.read(64 * 1024)
-            if not chunk:
-                return
-            self._buffer.extend(chunk)
-            starts = []
-            offset = 0
-            while True:
-                start = self._start_code(self._buffer, offset)
-                if start < 0:
-                    break
-                starts.append(start)
-                offset = start + 3
-            if len(starts) < 2:
-                continue
-            for start, end in zip(starts, starts[1:]):
-                nal = bytes(self._buffer[start:end])
-                if len(nal) > 4 and self._nal_type(nal) == 9:
-                    if self._access_unit:
-                        self._output.put(self._access_unit)
-                    self._access_unit = bytearray(nal)
-                else:
-                    self._access_unit.extend(nal)
-            del self._buffer[:starts[-1]]
-
-    def _next_access_unit(self) -> bytes:
+    def _open(self):
         try:
-            return self._output.get(timeout=2)
-        except queue.Empty as error:
-            raise EncoderError("FFmpeg did not produce an H.264 access unit") from error
+            import av
+            from fractions import Fraction
+        except ImportError as error:
+            raise EncoderError(
+                "H.264 encoding requires PyAV. Install it with "
+                'python -m pip install -e ".[runtime]", then restart Duo.'
+            ) from error
+        failures: list[str] = []
+        for name in self.candidates:
+            context = av.CodecContext.create(name, "w")
+            context.width = self.width
+            context.height = self.height
+            context.pix_fmt = "yuv420p"
+            context.framerate = Fraction(self.fps, 1)
+            context.time_base = Fraction(1, self.fps)
+            context.bit_rate = self.bitrate
+            context.gop_size = max(self.fps * 60, 1)
+            context.max_b_frames = 0
+            context.options = self._options(name)
+            try:
+                context.open()
+            except Exception as error:
+                failures.append(f"{name}: {error}")
+                continue
+            return context, name
+        detail = "; ".join(failures) if failures else "no encoders were compiled in"
+        raise EncoderError(f"No usable H.264 encoder. {detail}")
 
-    def _select_encoder(self) -> str:
-        result = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        available = result.stdout
-        for encoder in self.candidates:
-            if encoder in available:
-                return encoder
-        raise EncoderError("No H.264 encoder found; install FFmpeg with AMF, NVENC, QSV, or x264")
+    @staticmethod
+    def _options(name: str) -> dict[str, str]:
+        if name == "h264_amf":
+            return {
+                "usage": "ultralowlatency",
+                "rc": "cbr",
+                "quality": "speed",
+                "async_depth": "1",
+                "forced_idr": "1",
+                "aud": "1",
+                "bf": "0",
+                "profile": "main",
+                "level": "5.1",
+                "preanalysis": "0",
+                "latency": "1",
+            }
+        if name == "h264_nvenc":
+            return {
+                "preset": "p1",
+                "tune": "ull",
+                "rc": "cbr",
+                "delay": "0",
+                "zerolatency": "1",
+                "forced-idr": "1",
+                "bf": "0",
+                "aud": "1",
+                "profile": "main",
+                "level": "5.1",
+            }
+        if name == "h264_qsv":
+            return {
+                "preset": "veryfast",
+                "look_ahead": "0",
+                "bf": "0",
+                "async_depth": "1",
+                "profile": "main",
+                "level": "5.1",
+            }
+        return {
+            "preset": "ultrafast",
+            "tune": "zerolatency",
+            "bf": "0",
+            "profile": "main",
+            "level": "5.1",
+            "x264-params": "repeat-headers=1:aud=1:scenecut=0",
+        }
 
     @property
     def warning(self) -> str | None:
         return "Using software x264; latency may be higher" if self.encoder == "libx264" else None
 
-    def encode(self, image, keyframe: bool = False) -> EncodedFrame:
+    def encode(self, image, keyframe: bool = False) -> EncodedFrame | None:
+        import numpy as np
+
+        array = np.asarray(image)
+        if array.ndim != 3 or array.shape[2] != 3:
+            raise EncoderError("H.264 encoder requires an HxWx3 BGR capture array")
+        if array.shape[0] != self.height or array.shape[1] != self.width:
+            raise EncoderError(
+                f"Capture is {array.shape[1]}x{array.shape[0]} but the H.264 encoder is "
+                f"{self.width}x{self.height}"
+            )
+        import av
+
+        frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(array), format="bgr24")
+        frame.pts = self._pts
+        self._pts += 1
+        if keyframe:
+            frame.pict_type = av.video.frame.PictureType.I
         try:
-            raw = image.tobytes()
-        except AttributeError as error:
-            raise EncoderError("H.264 encoder requires a BGR capture array") from error
-        if self._process.stdin is None:
-            raise EncoderError("H.264 encoder input is unavailable")
-        try:
-            self._process.stdin.write(raw)
-            self._process.stdin.flush()
-        except (BrokenPipeError, OSError) as error:
-            raise EncoderError("FFmpeg H.264 encoder stopped") from error
-        return EncodedFrame(self._next_access_unit(), keyframe)
+            packets = self._context.encode(frame)
+        except av.FFmpegError as error:
+            raise EncoderError(f"H.264 encoder {self.encoder} failed: {error}") from error
+        if not self.parameter_sets:
+            self.parameter_sets = annexb_parameter_sets(bytes(self._context.extradata or b""))
+        if not packets:
+            return None
+        data = b"".join(bytes(packet) for packet in packets)
+        return EncodedFrame(data, any(bool(packet.is_keyframe) for packet in packets))
 
     def close(self) -> None:
-        if self._process.stdin is not None:
-            self._process.stdin.close()
-        self._process.terminate()
+        context = getattr(self, "_context", None)
+        self._context = None
+        if context is not None:
+            try:
+                context.encode(None)
+            except Exception:
+                return

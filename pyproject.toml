@@ -11,7 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-runtime = ["pymobiledevice3>=4", "dxcam>=0.0.5", "Pillow>=10"]
+runtime = ["pymobiledevice3>=4", "dxcam>=0.0.5", "Pillow>=10", "av>=14"]
 
 [project.scripts]
 duo-host = "duo_host.cli:main"

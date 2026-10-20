@@ -40,9 +40,17 @@ final class DuoViewController: UIViewController {
             self?.statusLabel.isHidden = true
         }
         client.onSampleBuffer = { [weak self] sample in
-            self?.videoLayer.enqueue(sample)
-            self?.imageView.isHidden = true
-            self?.statusLabel.isHidden = true
+            guard let self else { return }
+            if self.videoLayer.status == .failed {
+                self.videoLayer.flush()
+            }
+            if self.videoLayer.isReadyForMoreMediaData {
+                self.videoLayer.enqueue(sample)
+            } else {
+                self.client.requestKeyframe()
+            }
+            self.imageView.isHidden = true
+            self.statusLabel.isHidden = true
         }
         client.onStatus = { [weak self] status in
             self?.statusLabel.text = "\(status)\nProtocol \(DuoClient.protocolVersion)\nConnect the iPad by USB."
