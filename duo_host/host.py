@@ -55,21 +55,8 @@ class HostController:
             codec = Codec.JPEG
         fps = min(self.max_fps, hello.max_fps)
         requested = DisplayMode(max(hello.width, hello.height), min(hello.width, hello.height), fps)
-        actual = self.monitor.start(requested)
-        config = Config(codec, actual.width, actual.height, actual.fps)
-        self._config = config
         self.session = Session.start(transport)
         self.sender = FrameSender(transport)
-        touch_bounds = self.monitor.input_bounds()
-        LOG.info(
-            "Touch target %sx%s at %s,%s",
-            touch_bounds.width,
-            touch_bounds.height,
-            touch_bounds.left,
-            touch_bounds.top,
-        )
-        self.input_injector = InputInjector(touch_bounds)
-        transport.send(encode_frame(Frame(FrameType.CONFIG, 0, config.encode())))
         self._receiver_stop = Event()
         self._receiver = Thread(
             target=self._receive_loop,
@@ -84,6 +71,20 @@ class HostController:
             name="duo-heartbeat",
             daemon=True,
         ).start()
+        actual = self.monitor.start(requested)
+        config = Config(codec, actual.width, actual.height, actual.fps)
+        self._config = config
+        touch_bounds = self.monitor.input_bounds()
+        LOG.info(
+            "Touch target %sx%s at %s,%s",
+            touch_bounds.width,
+            touch_bounds.height,
+            touch_bounds.left,
+            touch_bounds.top,
+        )
+        self.input_injector = InputInjector(touch_bounds)
+        with self._send_lock:
+            transport.send(encode_frame(Frame(FrameType.CONFIG, 0, config.encode())))
         return config
 
     @property
@@ -151,10 +152,12 @@ class HostController:
                         except (OSError, ValueError) as error:
                             LOG.warning("Touch injection failed: %s", error)
                     else:
-                        self.session.receive(frame)
+                        with self._send_lock:
+                            if self.session is not None:
+                                self.session.receive(frame)
         except (OSError, ProtocolError) as error:
             if not stop.is_set():
-                LOG.warning("iPad input channel ended: %s", error)
+                self.disconnect(f"iPad input channel ended: {error}")
                 return
 
     def send_frame(self, frame: EncodedFrame, capture_timestamp_ns: int | None = None) -> bool:

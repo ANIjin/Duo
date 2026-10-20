@@ -10,7 +10,6 @@ from dataclasses import dataclass
 import ctypes
 import logging
 import struct
-import subprocess
 from ctypes import wintypes
 
 from .coordinates import MonitorBounds
@@ -283,26 +282,36 @@ class VirtualMonitor:
         self.started = False
 
     def ensure_driver(self) -> None:
-        if ctypes.windll.user32.EnumDisplayDevicesW is None:
+        if not hasattr(ctypes, "windll"):
+            return
+        user32 = ctypes.windll.user32
+        if user32.EnumDisplayDevicesW is None:
             raise MonitorError("Windows display APIs are unavailable")
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_PnPSignedDriver | "
-                "Where-Object { $_.DeviceClass -eq 'DISPLAY' } | "
-                "Select-Object DeviceName,DriverProviderName | ConvertTo-Json -Compress",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+
+        class DisplayDevice(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("DeviceName", wintypes.WCHAR * 32),
+                ("DeviceString", wintypes.WCHAR * 128),
+                ("StateFlags", wintypes.DWORD),
+                ("DeviceID", wintypes.WCHAR * 128),
+                ("DeviceKey", wintypes.WCHAR * 128),
+            ]
+
+        display = DisplayDevice()
+        display.cb = ctypes.sizeof(DisplayDevice)
+        wanted = self.driver_name.lower()
+        for index in range(16):
+            if not user32.EnumDisplayDevicesW(None, index, ctypes.byref(display), 0):
+                break
+            if wanted in str(display.DeviceString).lower():
+                return
+            display = DisplayDevice()
+            display.cb = ctypes.sizeof(DisplayDevice)
+        raise MonitorError(
+            f"Virtual display driver '{self.driver_name}' is missing. "
+            "Install the signed IddCx virtual display driver before starting."
         )
-        if result.returncode != 0 or self.driver_name.lower() not in result.stdout.lower():
-            raise MonitorError(
-                f"Virtual display driver '{self.driver_name}' is missing. "
-                "Install the signed IddCx virtual display driver before starting."
-            )
 
     def start(self, mode: DisplayMode) -> None:
         self.ensure_driver()
