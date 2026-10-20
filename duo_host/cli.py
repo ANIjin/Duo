@@ -88,7 +88,7 @@ def stream_session(transport, args: argparse.Namespace) -> int:
 
         config = controller.connect(transport, hello)
         LOG.info("Connected: %sx%s at %s fps using %s", config.width, config.height, config.fps, config.codec.name)
-        capture = _capture(args.monitor_index, config.fps)
+        capture = _capture(args.monitor_index, controller.monitor.device_name)
         if config.codec.name == "H264":
             encoder = FfmpegEncoder(config.width, config.height, config.fps)
             LOG.info("Using H.264 encoder %s", encoder.encoder)
@@ -143,9 +143,9 @@ def stream_session(transport, args: argparse.Namespace) -> int:
         transport.close()
 
 
-def _capture(monitor_index: int, fps: int):
+def _capture(monitor_index: int, device_name: str | None):
     from .monitor import DxcamCapture
-    return DxcamCapture(monitor_index)
+    return DxcamCapture(monitor_index, device_name)
 
 
 def main() -> int:
