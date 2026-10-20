@@ -1,9 +1,10 @@
 # Duo iPad client
 
 This directory contains the iPadOS client source layout. Open it in Xcode on
-macOS and add the Swift files to an iOS/iPadOS app target. The transport uses
-`NWListener` on the local usbmux-forwarded TCP endpoint; no Wi-Fi or LAN
-address is required.
+macOS and add the Swift files to an iOS/iPadOS app target. The transport uses `NWListener` bound to the loopback interface. The Windows
+host connects through usbmux, which delivers the socket to `127.0.0.1` on the
+iPad. A listener that follows the Wi-Fi path refuses that connection. No Wi-Fi
+or LAN address is required.
 
 The checked-in [DuoClient.xcodeproj](./DuoClient.xcodeproj) can be built by
 GitHub Actions. The `ipad-simulator` job performs an unsigned simulator build

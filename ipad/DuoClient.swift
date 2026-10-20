@@ -89,12 +89,32 @@ final class DuoClient: NSObject {
         case jpeg, h264
     }
 
+    func ensureStarted(port: UInt16) throws {
+        if listener != nil { return }
+        try start(port: port)
+    }
+
     func start(port: UInt16) throws {
         guard let endpoint = NWEndpoint.Port(rawValue: port) else { throw DuoClientError.invalidFrame }
-        let listener = try NWListener(using: .tcp, on: endpoint)
+        // usbmux connects to 127.0.0.1. A default NWListener follows the Wi-Fi path
+        // and prohibits loopback, so the USB connection is refused while the app
+        // still looks like it is waiting for the PC.
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .loopback
+        parameters.allowLocalEndpointReuse = true
+        let listener = try NWListener(using: parameters, on: endpoint)
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
         listener.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state { self?.setStatus(error.localizedDescription) }
+            switch state {
+            case .ready:
+                self?.setStatus("Waiting for PC")
+            case .waiting(let error):
+                self?.setStatus("USB listener waiting: \(error.localizedDescription)")
+            case .failed(let error):
+                self?.setStatus(error.localizedDescription)
+            default:
+                break
+            }
         }
         listener.start(queue: networkQueue)
         self.listener = listener

@@ -43,6 +43,24 @@ class SocketTransport:
             return
 
 
+def describe_connect_failure(error: BaseException, port: int) -> str:
+    """Explain a failed usbmux connect without blaming a missing Apple driver."""
+
+    text = str(error)
+    refused = type(error).__name__ == "ConnectionFailedError" or "Number': 3" in text or 'Number": 3' in text
+    if refused:
+        return (
+            f"The iPad is attached over USB, but Duo refused port {port}. "
+            "Leave Duo in the foreground. If it already says it is waiting for the PC, "
+            "reinstall the current Duo iPad app. The USB tunnel connects to localhost, "
+            "and a build that listens only on Wi-Fi refuses that connection."
+        )
+    return (
+        f"usbmux connection failed: {error}. Confirm Apple Devices or iTunes is installed, "
+        "the iPad is unlocked and trusted, and Duo is in the foreground."
+    )
+
+
 class UsbmuxTransportFactory:
     """Connect to the iPad TCP listener through pymobiledevice3 usbmux."""
 
@@ -70,10 +88,7 @@ class UsbmuxTransportFactory:
         except TransportError:
             raise
         except Exception as error:
-            raise TransportError(
-                f"usbmux connection failed: {error}. Confirm Apple Devices/iTunes "
-                "is installed, the iPad is trusted, and Duo is listening."
-            ) from error
+            raise TransportError(describe_connect_failure(error, self.port)) from error
 
     @staticmethod
     async def _find_device(list_devices):

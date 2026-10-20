@@ -4,21 +4,13 @@ Duo is an experimental wired USB second-display project for Windows and iPadOS.
 
 ## Feasibility target
 
-- Host: Windows 11 Home, build 10.0.26200
-- GPU: AMD Radeon 880M Graphics, driver 32.0.22076.3001
-- Expected hardware encoder: AMD AMF (to verify with the host encoder probe)
-- iPad: iPad 10th generation (user supplied; exact display mode to verify)
-- Cable: USB-C
-- Target mode: TBD; the client will advertise its native pixel dimensions
+Duo is meant to work on any Windows 10/11 laptop and any iPad with a USB-C or
+Lightning cable. The host picks a hardware H.264 encoder when the GPU provides
+one (`h264_amf`, `h264_nvenc`, or `h264_qsv`) and otherwise uses `libx264`.
+The iPad app reports its own pixel size during the handshake.
 
-The following Phase 0 checks still require the target devices and installed Apple
-Mobile Device Support were manually completed by the project owner, including
-virtual display-driver installation, usbmux discovery, the hello exchange, and
-60 fps capture. Exact local driver observations are hardware-specific.
-
-The current host code intentionally keeps the driver, capture, usbmux, and
-encoder integrations behind explicit adapters. This allows protocol tests to
-run in GitHub Actions without pretending CI has an attached iPad.
+The host keeps the driver, capture, usbmux, and encoder integrations behind
+explicit adapters so protocol tests can run without an attached iPad.
 
 ## Development
 
@@ -35,10 +27,22 @@ on macOS for signing and device testing.
 
 ## Device installation
 
-1. Install the signed IddCx virtual display driver and confirm it appears in
-   Windows Display settings.
-2. Install Apple Devices or iTunes on Windows so Apple Mobile Device Support
-   and usbmux are available. Trust the PC on the iPad.
+These steps are the same on any Windows laptop. The iPad app has to be a build
+that listens on localhost. An older build listens on Wi-Fi only. The iPad is
+attached and Duo can be open, but usbmux still gets "connection refused" on
+port 24862. Reinstall the current app after pulling these client changes.
+
+1. Install a signed IddCx virtual display driver and confirm a second monitor
+   appears in Windows Display settings. The host looks for a driver named
+   `Virtual Display Driver` unless you pass `--driver-name`.
+2. Install Apple Devices or iTunes so Apple Mobile Device Support and usbmux
+   are available. Unlock the iPad, connect the cable, and tap Trust. Developer
+   Mode must be on for a sideloaded app. Confirm the iPad is visible:
+
+   ```powershell
+   python -c "from pymobiledevice3.usbmux import list_devices; import asyncio; print(asyncio.run(list_devices()))"
+   ```
+
 3. Install the host package with the runtime extra, then start the host:
 
    ```powershell
@@ -66,19 +70,21 @@ on macOS for signing and device testing.
    streamed frames per second if JPEG encoding or USB transfer is the
    bottleneck.
    The host requires H.264 when the iPad advertises it. Reinstall the runtime
-   extra so PyAV is available (`python -m pip install -e ".[runtime]"`). The
-   host uses `h264_amf` on this AMD GPU when PyAV can open it, and otherwise
-   falls back to another hardware encoder or `libx264`. If no encoder opens,
-   the host stops with an actionable error instead of silently switching to
-   the slow JPEG path. Use `--codec jpeg` only to explicitly select the fallback.
-   On Windows, one option is:
+   extra so PyAV is available (`python -m pip install -e ".[runtime]"`). PyAV
+   tries `h264_amf`, `h264_nvenc`, and `h264_qsv` before `libx264`, so an AMD,
+   NVIDIA, or Intel GPU can encode in hardware and every other Windows PC can
+   still stream with software x264. If no encoder opens, the host stops with
+   an actionable error instead of silently switching to the slow JPEG path.
+   Use `--codec jpeg` only to explicitly select the fallback.
+   On Windows, one option for the encoders is:
 
    ```powershell
    winget install --id Gyan.FFmpeg.Shared
    ```
 
    Open a new PowerShell window afterward and verify `ffmpeg -encoders`
-   lists `h264_amf` or `libx264`.
+   lists `libx264` and, when the GPU supports it, `h264_amf`, `h264_nvenc`,
+   or `h264_qsv`.
    The startup log includes the iPad HELLO dimensions and advertised codecs.
    It should list `H264`. A HELLO of `2048x1536` means iPadOS is running the
    app in compatibility mode or an older build is installed. The current
@@ -96,12 +102,14 @@ python -c "from pymobiledevice3.usbmux import list_devices; import asyncio; prin
 ```
 
 The host supports current `pymobiledevice3` releases and uses the USB device
-list returned by usbmuxd. If the iPad appears in that command but the app does
-not connect, keep Duo in the foreground and verify that port `24862` is the
-port configured in the iPad app.
-4. Open the iPad app in the foreground and connect the USB-C cable.
-5. In Xcode, select the iPad as the run destination and sign the app. A free
-   Apple ID provisioning profile normally expires after seven days.
+list returned by usbmuxd. If that list shows the iPad but the host says Duo
+refused port `24862`, the cable and trust are already working. The installed
+app is not accepting the localhost tunnel. Sideload the current build and
+leave it in the foreground.
+4. Open the iPad app in the foreground and connect the cable.
+5. Sign and install the app with Xcode, SideStore, or AltStore. A free Apple
+   ID provisioning profile normally expires after seven days. The host cannot
+   update the app on the iPad.
 
 Touch events are sent as normalized coordinates and Windows touch injection is
 enabled when the host is run elevated if required by the installed driver.

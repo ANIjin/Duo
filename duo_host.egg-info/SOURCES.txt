@@ -2,6 +2,8 @@ LICENSE
 README.md
 pyproject.toml
 duo_host/__init__.py
+duo_host/__main__.py
+duo_host/cli.py
 duo_host/coordinates.py
 duo_host/host.py
 duo_host/input.py
@@ -15,11 +17,17 @@ duo_host/transport.py
 duo_host.egg-info/PKG-INFO
 duo_host.egg-info/SOURCES.txt
 duo_host.egg-info/dependency_links.txt
+duo_host.egg-info/entry_points.txt
 duo_host.egg-info/requires.txt
 duo_host.egg-info/top_level.txt
+tests/test_cli.py
 tests/test_clock_offset.py
 tests/test_coordinates.py
+tests/test_h264_encoder.py
+tests/test_input_protocol.py
+tests/test_jpeg_encoder.py
 tests/test_protocol.py
 tests/test_protocol_extended.py
 tests/test_sender.py
 tests/test_stream_and_telemetry.py
+tests/test_touch_injection.py

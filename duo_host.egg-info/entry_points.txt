@@ -1,0 +1,2 @@
+[console_scripts]
+duo-host = duo_host.cli:main

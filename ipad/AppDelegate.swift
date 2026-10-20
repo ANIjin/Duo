@@ -14,4 +14,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
         return true
     }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        (window?.rootViewController as? DuoViewController)?.startLink()
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        (window?.rootViewController as? DuoViewController)?.stopLink()
+    }
 }

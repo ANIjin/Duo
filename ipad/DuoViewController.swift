@@ -35,7 +35,6 @@ final class DuoViewController: UIViewController {
         statusLabel.frame = view.bounds
         statusLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(statusLabel)
-        UIApplication.shared.isIdleTimerDisabled = true
         client.onImage = { [weak self] image in
             self?.imageView.image = image
             self?.statusLabel.isHidden = true
@@ -58,11 +57,21 @@ final class DuoViewController: UIViewController {
             self?.statusLabel.text = "\(status)\nProtocol \(DuoClient.protocolVersion)\nConnect the iPad by USB."
             self?.statusLabel.isHidden = status == "Connected" || streaming
         }
+        startLink()
+    }
+
+    func startLink() {
+        UIApplication.shared.isIdleTimerDisabled = true
         do {
-            try client.start(port: 24862)
+            try client.ensureStarted(port: 24862)
         } catch {
             statusLabel.text = error.localizedDescription
         }
+    }
+
+    func stopLink() {
+        UIApplication.shared.isIdleTimerDisabled = false
+        client.stop()
     }
 
     override func viewDidLayoutSubviews() {
@@ -103,9 +112,4 @@ final class DuoViewController: UIViewController {
         }
     }
 
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        UIApplication.shared.isIdleTimerDisabled = false
-        client.stop()
-    }
 }

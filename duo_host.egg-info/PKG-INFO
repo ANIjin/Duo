@@ -6,4 +6,9 @@ Requires-Python: >=3.11
 License-File: LICENSE
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
+Provides-Extra: runtime
+Requires-Dist: pymobiledevice3>=4; extra == "runtime"
+Requires-Dist: dxcam>=0.0.5; extra == "runtime"
+Requires-Dist: Pillow>=10; extra == "runtime"
+Requires-Dist: av>=14; extra == "runtime"
 Dynamic: license-file
