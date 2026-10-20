@@ -201,7 +201,7 @@ final class DuoClient: NSObject {
         guard blockStatus == kCMBlockBufferNoErr, let block else { return }
         let copyStatus = avcc.withUnsafeBytes { bytes -> OSStatus in
             guard let baseAddress = bytes.baseAddress else {
-                return kCMBlockBufferBadPointerParameter
+                return OSStatus(paramErr)
             }
             return CMBlockBufferReplaceDataBytes(
                 with: baseAddress,
@@ -300,7 +300,7 @@ final class DuoClient: NSObject {
         var id = contactID.bigEndian
         payload.append(Data(bytes: &id, count: 2))
         payload.append(phase)
-        var values = [x, y, pressure]
+        let values = [x, y, pressure]
         for value in values {
             var bits = value.bitPattern.bigEndian
             payload.append(Data(bytes: &bits, count: 4))
