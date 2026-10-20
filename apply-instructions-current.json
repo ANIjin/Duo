@@ -1,0 +1,257 @@
+﻿{
+  "changeName": "add-usb-ipad-display",
+  "changeDir": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\proposal.md"
+    ],
+    "specs": [
+      "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\specs\\ipad-usb-display\\spec.md"
+    ],
+    "design": [
+      "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\design.md"
+    ],
+    "tasks": [
+      "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 32,
+    "complete": 22,
+    "remaining": 10
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 Record target hardware (Windows GPU and encoder, iPad model, cable) in the project README",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 3
+    },
+    {
+      "id": "2",
+      "description": "1.2 Install the open-source virtual display driver; confirm a monitor appears and note whether modes can be set at runtime and whether the install needs test-signing",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 4
+    },
+    {
+      "id": "3",
+      "description": "1.3 Confirm Apple Mobile Device Support is present and `pymobiledevice3` can list the iPad over usbmux",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 5
+    },
+    {
+      "id": "4",
+      "description": "1.4 Create a minimal iPad app that listens on a TCP port; from the PC, open a usbmux connection to it and exchange a \"hello\" message",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 6
+    },
+    {
+      "id": "5",
+      "description": "1.5 Capture the virtual monitor with `dxcam` and confirm frames arrive at 60 fps",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 7
+    },
+    {
+      "id": "6",
+      "description": "1.6 Write findings and any design changes back into `design.md`",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 8
+    },
+    {
+      "id": "7",
+      "description": "2.1 Define the frame format and implement HELLO, CONFIG, FRAME, PING/PONG, BYE on both sides",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 12
+    },
+    {
+      "id": "8",
+      "description": "2.2 Implement host session lifecycle: wait for device, connect, handshake",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 13
+    },
+    {
+      "id": "9",
+      "description": "2.3 Create the virtual monitor on connect and remove it on disconnect",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 14
+    },
+    {
+      "id": "10",
+      "description": "2.4 Capture the virtual monitor and send JPEG frames with latest-frame-wins dropping",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 15
+    },
+    {
+      "id": "11",
+      "description": "2.5 iPad: decode and display JPEG full-screen, disable idle timer, lock landscape",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 16
+    },
+    {
+      "id": "12",
+      "description": "2.6 Add heartbeat, 2-second link-loss detection, and auto-reconnect",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 17
+    },
+    {
+      "id": "13",
+      "description": "2.7 Demo: drag a window onto the iPad over USB on an isolated network",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 18
+    },
+    {
+      "id": "14",
+      "description": "3.1 Integrate encoder selection (NVENC, QuickSync, AMF) with software fallback",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 22
+    },
+    {
+      "id": "15",
+      "description": "3.2 Configure low-latency encoding: no B-frames, small rate-control buffer, on-demand keyframes",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 23
+    },
+    {
+      "id": "16",
+      "description": "3.3 Send parameter sets in CONFIG and implement KEYFRAME_REQ",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 24
+    },
+    {
+      "id": "17",
+      "description": "3.4 iPad: VideoToolbox decode and display-layer rendering",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 25
+    },
+    {
+      "id": "18",
+      "description": "3.5 Add timestamps, clock-offset estimation, and p50/p95 latency telemetry",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 26
+    },
+    {
+      "id": "19",
+      "description": "3.6 Handle static screens with periodic refresh or heartbeat",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 27
+    },
+    {
+      "id": "20",
+      "description": "3.7 Tune bitrate and frame pacing; record measured latency against the target",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 28
+    },
+    {
+      "id": "21",
+      "description": "3.8 Decision point: if p95 misses target, scope a native capture-encode-send module (design D3)",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 29
+    },
+    {
+      "id": "22",
+      "description": "4.1 iPad: capture touch and Pencil events and send normalized coordinates",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 33
+    },
+    {
+      "id": "23",
+      "description": "4.2 Host: map coordinates to the virtual monitor bounds",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 34
+    },
+    {
+      "id": "24",
+      "description": "4.3 Host: inject touch via the Windows touch injection API, including multi-touch",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 35
+    },
+    {
+      "id": "25",
+      "description": "4.4 Host: inject pen input with pressure from Apple Pencil",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 36
+    },
+    {
+      "id": "26",
+      "description": "4.5 Release all contacts on disconnect; add view-only switch",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 37
+    },
+    {
+      "id": "27",
+      "description": "5.1 Tray app with start/stop, status, view-only toggle, and settings for bitrate and refresh cap",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 41
+    },
+    {
+      "id": "28",
+      "description": "5.2 Mode negotiation: match the iPad's reported resolution and refresh, with nearest-mode fallback",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 42
+    },
+    {
+      "id": "29",
+      "description": "5.3 Background/foreground handling between iPad and host",
+      "done": false,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 43
+    },
+    {
+      "id": "30",
+      "description": "5.4 Actionable errors for missing driver, missing Apple Mobile Device Support, and version mismatch",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 44
+    },
+    {
+      "id": "31",
+      "description": "5.5 Document install steps, sideload and 7-day re-signing, and known limitations (DRM black frames, UAC and lock screen)",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 45
+    },
+    {
+      "id": "32",
+      "description": "5.6 Add tests for protocol framing and coordinate mapping; add MIT license and a release build",
+      "done": true,
+      "sourcePath": "C:\\Users\\Anish\\Duo\\openspec\\changes\\add-usb-ipad-display\\tasks.md",
+      "line": 46
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "C:\\Users\\Anish\\Duo",
+    "source": "nearest"
+  }
+}

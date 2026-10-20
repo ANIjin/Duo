@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 import socket
 import time
 from typing import Callable, Protocol
@@ -40,25 +41,35 @@ class UsbmuxTransportFactory:
 
     def connect(self) -> ByteTransport:
         try:
-            from pymobiledevice3.usbmux import Usbmux
+            from pymobiledevice3.usbmux import list_devices
         except ImportError as error:
             raise TransportError(
-                "Apple Mobile Device Support and pymobiledevice3 are required. "
-                "Install Apple Devices/iTunes, then run 'python -m pip install pymobiledevice3'."
+                "pymobiledevice3 is not available to this Python interpreter. "
+                "Install it with 'python -m pip install pymobiledevice3'."
             ) from error
         try:
-            devices = Usbmux().devices
-            if not devices:
-                raise TransportError("No trusted iPad is attached over USB.")
-            connection = Usbmux().connect(devices[0].serial, self.port)
-            return connection
+            device = asyncio.run(self._find_device(list_devices))
+            if device is None:
+                raise TransportError(
+                    "No trusted iPad is attached over USB. Unlock the iPad, tap Trust, "
+                    "and keep Duo open in the foreground."
+                )
+            connection = asyncio.run(device.connect(self.port))
+            connection.setblocking(True)
+            return SocketTransport(connection)
         except TransportError:
             raise
         except Exception as error:
             raise TransportError(
-                "Unable to reach usbmux. Install Apple Mobile Device Support "
-                "with Apple Devices or iTunes and trust this computer on the iPad."
+                f"usbmux connection failed: {error}. Confirm Apple Devices/iTunes "
+                "is installed, the iPad is trusted, and Duo is listening."
             ) from error
+
+    @staticmethod
+    async def _find_device(list_devices):
+        devices = await list_devices()
+        usb_devices = [device for device in devices if device.is_usb]
+        return usb_devices[0] if usb_devices else None
 
 
 @dataclass(slots=True)

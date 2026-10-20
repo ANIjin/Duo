@@ -98,9 +98,11 @@ final class DuoClient: NSObject {
 
     private func sendHello() {
         let pixels = UIScreen.main.nativeBounds.size
+        let widthPixels = max(pixels.width, pixels.height)
+        let heightPixels = min(pixels.width, pixels.height)
         var payload = Data([DuoClient.protocolVersion])
-        var width = UInt16(pixels.width).bigEndian
-        var height = UInt16(pixels.height).bigEndian
+        var width = UInt16(widthPixels).bigEndian
+        var height = UInt16(heightPixels).bigEndian
         var fps = UInt16(60).bigEndian
         var scale = Float(UIScreen.main.nativeScale).bitPattern.bigEndian
         payload.append(Data(bytes: &width, count: 2))
@@ -164,6 +166,20 @@ final class DuoClient: NSObject {
         connection?.send(content: frame.encoded(), completion: .contentProcessed { [weak self] error in
             if let error { self?.setStatus(error.localizedDescription) }
         })
+    }
+
+    func sendInput(contactID: UInt16, phase: UInt8, x: Float, y: Float, pressure: Float = 0, pen: Bool = false) {
+        var payload = Data()
+        var id = contactID.bigEndian
+        payload.append(Data(bytes: &id, count: 2))
+        payload.append(phase)
+        var values = [x, y, pressure]
+        for value in values {
+            var bits = value.bitPattern.bigEndian
+            payload.append(Data(bytes: &bits, count: 4))
+        }
+        payload.append(pen ? 1 : 0)
+        send(DuoFrame(type: .input, flags: 0, payload: payload))
     }
 
     private func setStatus(_ value: String) {

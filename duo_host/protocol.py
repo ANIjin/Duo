@@ -159,6 +159,38 @@ class Ping:
         return cls(cls._HEADER.unpack(payload)[0])
 
 
+@dataclass(frozen=True, slots=True)
+class Input:
+    contact_id: int
+    phase: int
+    x: float
+    y: float
+    pressure: float = 0.0
+    pen: bool = False
+
+    _HEADER = struct.Struct(">HBfff?")
+
+    def encode(self) -> bytes:
+        if self.contact_id < 0 or self.contact_id > 65535:
+            raise ProtocolError("input contact id must fit in uint16")
+        if self.phase < 0 or self.phase > 255:
+            raise ProtocolError("input phase must fit in uint8")
+        if not 0 <= self.x <= 1 or not 0 <= self.y <= 1:
+            raise ProtocolError("input coordinates must be normalized to 0..1")
+        if not 0 <= self.pressure <= 1:
+            raise ProtocolError("input pressure must be normalized to 0..1")
+        return self._HEADER.pack(
+            self.contact_id, self.phase, self.x, self.y, self.pressure, self.pen
+        )
+
+    @classmethod
+    def decode(cls, payload: bytes) -> Input:
+        if len(payload) != cls._HEADER.size:
+            raise ProtocolError("input payload is invalid")
+        contact_id, phase, x, y, pressure, pen = cls._HEADER.unpack(payload)
+        return cls(contact_id, phase, x, y, pressure, pen)
+
+
 class FrameStream:
     """Incrementally parses frames from a byte stream."""
 

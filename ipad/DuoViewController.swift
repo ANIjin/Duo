@@ -10,7 +10,9 @@ final class DuoViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        imageView.contentMode = .scaleAspectFit
+        view.insetsLayoutMarginsFromSafeArea = false
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
         imageView.frame = view.bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(imageView)
@@ -34,6 +36,39 @@ final class DuoViewController: UIViewController {
             try client.start(port: 24862)
         } catch {
             statusLabel.text = error.localizedDescription
+        }
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        send(touches, phase: 0)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        send(touches, phase: 1)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        send(touches, phase: 2)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        send(touches, phase: 3)
+    }
+
+    private func send(_ touches: Set<UITouch>, phase: UInt8) {
+        for touch in touches {
+            let point = touch.location(in: view)
+            let x = Float(max(0, min(1, point.x / view.bounds.width)))
+            let y = Float(max(0, min(1, point.y / view.bounds.height)))
+            let pressure = touch.type == .pencil ? touch.force / max(touch.maximumPossibleForce, 1) : 0
+            client.sendInput(
+                contactID: UInt16(abs(ObjectIdentifier(touch).hashValue) % Int(UInt16.max)),
+                phase: phase,
+                x: x,
+                y: y,
+                pressure: Float(pressure),
+                pen: touch.type == .pencil
+            )
         }
     }
 

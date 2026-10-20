@@ -26,7 +26,7 @@ The host prototype targets Python 3.11+. Install development dependencies and ru
 the protocol tests with:
 
 ```powershell
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,runtime]"
 python -m pytest
 ```
 
@@ -39,14 +39,48 @@ on macOS for signing and device testing.
    Windows Display settings.
 2. Install Apple Devices or iTunes on Windows so Apple Mobile Device Support
    and usbmux are available. Trust the PC on the iPad.
-3. Install the host package with the development extra, then start the host
-   controller.
+3. Install the host package with the runtime extra, then start the host:
+
+   ```powershell
+   python -m duo_host
+   ```
+
+   The default driver name is `Virtual Display Driver` (MikeTheTech's driver).
+   Use `--driver-name` if a different IddCx driver is installed.
+   Use `--monitor-index` if the virtual monitor is not Windows display index 1.
+   JPEG quality defaults to 55 to reduce USB latency; increase it if image
+   quality is more important than responsiveness:
+
+   ```powershell
+   python -m duo_host --jpeg-quality 75 --max-fps 60
+   ```
+
+   The host normalizes portrait handshake dimensions to landscape, requests
+   that mode from the virtual driver, and reports the actual supported mode
+   back to the iPad. If the driver cannot provide the requested aspect ratio,
+   the iPad uses a full-screen fill presentation, which may crop a small
+   amount rather than showing a border.
+   Use `--once` to exit instead of retrying when the iPad is unavailable.
+
+If the host reports a usbmux import error, install the runtime package into
+the same interpreter that starts the host:
+
+```powershell
+python -m pip install -e ".[runtime]"
+python -c "from pymobiledevice3.usbmux import list_devices; import asyncio; print(asyncio.run(list_devices()))"
+```
+
+The host supports current `pymobiledevice3` releases and uses the USB device
+list returned by usbmuxd. If the iPad appears in that command but the app does
+not connect, keep Duo in the foreground and verify that port `24862` is the
+port configured in the iPad app.
 4. Open the iPad app in the foreground and connect the USB-C cable.
 5. In Xcode, select the iPad as the run destination and sign the app. A free
    Apple ID provisioning profile normally expires after seven days.
 
-The project is view-only until the Windows touch and pen injection adapters are
-enabled. DRM-protected windows may capture as black, and the Windows secure
-desktop, UAC prompts, and lock screen are not capturable. The iPad client must
-remain foregrounded while streaming; background/foreground resume is still
-tracked as a later task.
+Touch events are sent as normalized coordinates and Windows touch injection is
+enabled when the host is run elevated if required by the installed driver.
+Apple Pencil events are transported, but pressure-aware Windows pen injection
+is still experimental. DRM-protected windows may capture as black, and the
+Windows secure desktop, UAC prompts, and lock screen are not capturable. The
+iPad client must remain foregrounded while streaming.

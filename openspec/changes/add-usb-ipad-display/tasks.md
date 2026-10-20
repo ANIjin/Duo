@@ -30,9 +30,9 @@
 
 ## 4. Phase 3: Touch and Pencil input
 
-- [ ] 4.1 iPad: capture touch and Pencil events and send normalized coordinates
+- [x] 4.1 iPad: capture touch and Pencil events and send normalized coordinates
 - [x] 4.2 Host: map coordinates to the virtual monitor bounds
-- [ ] 4.3 Host: inject touch via the Windows touch injection API, including multi-touch
+- [x] 4.3 Host: inject touch via the Windows touch injection API, including multi-touch
 - [ ] 4.4 Host: inject pen input with pressure from Apple Pencil
 - [x] 4.5 Release all contacts on disconnect; add view-only switch
 
