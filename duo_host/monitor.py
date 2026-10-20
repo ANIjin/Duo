@@ -134,11 +134,52 @@ class VirtualMonitor:
         if result != 0:
             current = DevMode()
             current.dmSize = ctypes.sizeof(DevMode)
+            current_mode = None
             if user32.EnumDisplaySettingsW(found, -1, ctypes.byref(current)):
-                fallback = DisplayMode(
+                current_mode = DisplayMode(
                     int(current.dmPelsWidth),
                     int(current.dmPelsHeight),
                     int(current.dmDisplayFrequency or mode.fps),
+                )
+            supported = []
+            mode_index = 0
+            while True:
+                candidate = DevMode()
+                candidate.dmSize = ctypes.sizeof(DevMode)
+                if not user32.EnumDisplaySettingsW(found, mode_index, ctypes.byref(candidate)):
+                    break
+                if candidate.dmPelsWidth and candidate.dmPelsHeight:
+                    supported.append(
+                        DisplayMode(
+                            int(candidate.dmPelsWidth),
+                            int(candidate.dmPelsHeight),
+                            int(candidate.dmDisplayFrequency or mode.fps),
+                        )
+                    )
+                mode_index += 1
+            if supported and current_mode is not None:
+                requested_aspect = mode.width / mode.height
+                current_aspect = current_mode.width / current_mode.height
+                if abs(current_aspect - requested_aspect) <= 0.12:
+                    LOG.warning(
+                        "Driver rejected %sx%s@%s; using current mode %sx%s@%s",
+                        mode.width, mode.height, mode.fps,
+                        current_mode.width, current_mode.height, current_mode.fps,
+                    )
+                    return current_mode
+            if supported:
+                requested_aspect = mode.width / mode.height
+                same_aspect = [
+                    candidate for candidate in supported
+                    if abs(candidate.width / candidate.height - requested_aspect) <= 0.01
+                ]
+                candidates = same_aspect or supported
+                fallback = min(
+                    candidates,
+                    key=lambda candidate: (
+                        abs(candidate.width * candidate.height - mode.width * mode.height),
+                        abs(candidate.fps - mode.fps),
+                    ),
                 )
                 LOG.warning(
                     "Driver rejected %sx%s@%s; using supported mode %sx%s@%s",

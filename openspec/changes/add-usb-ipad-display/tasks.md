@@ -39,7 +39,7 @@
 ## 5. Phase 4: Polish and release
 
 - [ ] 5.1 Tray app with start/stop, status, view-only toggle, and settings for bitrate and refresh cap
-- [ ] 5.2 Mode negotiation: match the iPad's reported resolution and refresh, with nearest-mode fallback
+- [x] 5.2 Mode negotiation: match the iPad's reported resolution and refresh, with nearest-mode fallback
 - [ ] 5.3 Background/foreground handling between iPad and host
 - [x] 5.4 Actionable errors for missing driver, missing Apple Mobile Device Support, and version mismatch
 - [x] 5.5 Document install steps, sideload and 7-day re-signing, and known limitations (DRM black frames, UAC and lock screen)

@@ -71,10 +71,22 @@ def stream_session(transport, args: argparse.Namespace) -> int:
         LOG.info("Connected: %sx%s at %s fps using %s", config.width, config.height, config.fps, config.codec.name)
         capture = _capture(args.monitor_index, config.fps)
         encoder = JpegEncoder(args.jpeg_quality)
+        last_metrics = time.monotonic()
         for image in capture.frames(config.fps):
             encoded = encoder.encode(image)
             controller.send_frame(encoded)
             controller.tick()
+            if controller.sender is not None and time.monotonic() - last_metrics >= 2:
+                metrics = controller.sender.telemetry.snapshot()
+                LOG.info(
+                    "Stream %.1f fps, %.1f Mbps, p50 %.1f ms, p95 %.1f ms, dropped %d",
+                    metrics["fps"],
+                    metrics["bitrate_bps"] / 1_000_000,
+                    metrics["latency_p50_ms"],
+                    metrics["latency_p95_ms"],
+                    metrics["dropped_frames"],
+                )
+                last_metrics = time.monotonic()
         return 0
     finally:
         controller.disconnect()

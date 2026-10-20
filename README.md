@@ -60,6 +60,10 @@ on macOS for signing and device testing.
    back to the iPad. If the driver cannot provide the requested aspect ratio,
    the iPad uses a full-screen fill presentation, which may crop a small
    amount rather than showing a border.
+   During streaming, the host logs measured send FPS separately from the
+   monitor's configured refresh rate. A 60 Hz monitor can show less than 60
+   streamed frames per second if JPEG encoding or USB transfer is the
+   bottleneck.
    Use `--once` to exit instead of retrying when the iPad is unavailable.
 
 If the host reports a usbmux import error, install the runtime package into

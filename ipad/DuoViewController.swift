@@ -11,11 +11,17 @@ final class DuoViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         view.insetsLayoutMarginsFromSafeArea = false
+        additionalSafeAreaInsets = .zero
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.frame = view.bounds
-        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        imageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
         statusLabel.textColor = .white
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0

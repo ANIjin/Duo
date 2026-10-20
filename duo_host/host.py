@@ -47,26 +47,30 @@ class HostController:
 
     def _receive_loop(self, transport: ByteTransport, stop: Event) -> None:
         parser = FrameStream()
-        while not stop.is_set() and self.session is not None and self.session.connected:
-            data = transport.recv()
-            if not data:
-                break
-            for frame in parser.feed(data):
-                if frame.message_type == FrameType.INPUT and self.input_injector is not None:
-                    event = Input.decode(frame.payload)
-                    phases = ("began", "moved", "ended", "cancelled")
-                    self.input_injector.inject(
-                        InputEvent(
-                            event.contact_id,
-                            event.x,
-                            event.y,
-                            phases[event.phase] if event.phase < len(phases) else "cancelled",
-                            event.pressure,
-                            event.pen,
+        try:
+            while not stop.is_set() and self.session is not None and self.session.connected:
+                data = transport.recv()
+                if not data:
+                    break
+                for frame in parser.feed(data):
+                    if frame.message_type == FrameType.INPUT and self.input_injector is not None:
+                        event = Input.decode(frame.payload)
+                        phases = ("began", "moved", "ended", "cancelled")
+                        self.input_injector.inject(
+                            InputEvent(
+                                event.contact_id,
+                                event.x,
+                                event.y,
+                                phases[event.phase] if event.phase < len(phases) else "cancelled",
+                                event.pressure,
+                                event.pen,
+                            )
                         )
-                    )
-                else:
-                    self.session.receive(frame)
+                    else:
+                        self.session.receive(frame)
+        except OSError:
+            if not stop.is_set():
+                return
 
     def send_frame(self, frame: EncodedFrame, capture_timestamp_ns: int | None = None) -> bool:
         if self.session is None or self.sender is None:
