@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import shutil
 from threading import Event, Thread
 
 from .coordinates import MonitorBounds
@@ -26,7 +27,11 @@ class HostController:
     _receiver_stop: Event | None = None
 
     def connect(self, transport: ByteTransport, hello: Hello) -> Config:
-        codec = Codec.JPEG if Codec.JPEG in hello.codecs else Codec.H264
+        codec = (
+            Codec.H264
+            if Codec.H264 in hello.codecs and shutil.which("ffmpeg")
+            else Codec.JPEG
+        )
         fps = min(self.max_fps, hello.max_fps)
         requested = DisplayMode(max(hello.width, hello.height), min(hello.width, hello.height), fps)
         actual = self.monitor.start(requested)

@@ -1,9 +1,11 @@
 import UIKit
+import AVFoundation
 
 final class DuoViewController: UIViewController {
     private let imageView = UIImageView()
     private let statusLabel = UILabel()
     private let client = DuoClient()
+    private let videoLayer = AVSampleBufferDisplayLayer()
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
 
@@ -22,6 +24,10 @@ final class DuoViewController: UIViewController {
             imageView.topAnchor.constraint(equalTo: view.topAnchor),
             imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        videoLayer.videoGravity = .resize
+        videoLayer.frame = view.bounds
+        videoLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        view.layer.addSublayer(videoLayer)
         statusLabel.textColor = .white
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
@@ -32,6 +38,11 @@ final class DuoViewController: UIViewController {
         UIApplication.shared.isIdleTimerDisabled = true
         client.onImage = { [weak self] image in
             self?.imageView.image = image
+            self?.statusLabel.isHidden = true
+        }
+        client.onSampleBuffer = { [weak self] sample in
+            self?.videoLayer.enqueue(sample)
+            self?.imageView.isHidden = true
             self?.statusLabel.isHidden = true
         }
         client.onStatus = { [weak self] status in

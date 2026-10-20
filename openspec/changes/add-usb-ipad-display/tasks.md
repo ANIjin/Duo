@@ -22,7 +22,7 @@
 - [x] 3.1 Integrate encoder selection (NVENC, QuickSync, AMF) with software fallback
 - [x] 3.2 Configure low-latency encoding: no B-frames, small rate-control buffer, on-demand keyframes
 - [x] 3.3 Send parameter sets in CONFIG and implement KEYFRAME_REQ
-- [ ] 3.4 iPad: VideoToolbox decode and display-layer rendering
+- [x] 3.4 iPad: VideoToolbox decode and display-layer rendering
 - [x] 3.5 Add timestamps, clock-offset estimation, and p50/p95 latency telemetry
 - [x] 3.6 Handle static screens with periodic refresh or heartbeat
 - [ ] 3.7 Tune bitrate and frame pacing; record measured latency against the target

@@ -64,6 +64,18 @@ on macOS for signing and device testing.
    monitor's configured refresh rate. A 60 Hz monitor can show less than 60
    streamed frames per second if JPEG encoding or USB transfer is the
    bottleneck.
+   The host uses H.264 automatically when `ffmpeg` is installed and the iPad
+   advertises H.264. Install an FFmpeg build that includes `h264_amf` for the
+   AMD GPU (or `libx264` as a software fallback), then restart the host. If
+   FFmpeg is unavailable, the host intentionally falls back to JPEG.
+   On Windows, one option is:
+
+   ```powershell
+   winget install --id Gyan.FFmpeg.Shared
+   ```
+
+   Open a new PowerShell window afterward and verify `ffmpeg -encoders`
+   lists `h264_amf` or `libx264`.
    The startup log includes the iPad HELLO dimensions. With the current iPad
    build it should say `2360x1640`; if it says `2048x1536`, rebuild and
    sideload the latest IPA because that is an older client build.
