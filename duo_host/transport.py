@@ -30,7 +30,10 @@ class SocketTransport:
         return self.connection.recv(size)
 
     def close(self) -> None:
-        self.connection.close()
+        try:
+            self.connection.close()
+        except OSError:
+            return
 
 
 class UsbmuxTransportFactory:

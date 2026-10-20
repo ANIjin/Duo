@@ -237,10 +237,6 @@ class FfmpegEncoder:
         return EncodedFrame(data, any(bool(packet.is_keyframe) for packet in packets))
 
     def close(self) -> None:
-        context = getattr(self, "_context", None)
+        # Drop the context without flushing. AMF's flush call can block forever
+        # after a stalled submit, which would keep the host from reconnecting.
         self._context = None
-        if context is not None:
-            try:
-                context.encode(None)
-            except Exception:
-                return

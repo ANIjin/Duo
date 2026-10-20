@@ -66,6 +66,12 @@ final class DuoClient: NSObject {
     private var listener: NWListener?
     private var connection: NWConnection?
     private let parser = DuoFrameParser()
+    private let networkQueue = DispatchQueue(label: "duo.network")
+    private let decodeQueue = DispatchQueue(label: "duo.decode")
+    private let videoLock = NSLock()
+    private var queuedAnnexB: Data?
+    private var queuedTimestamp: UInt64 = 0
+    private var decodeScheduled = false
     private(set) var status = "Waiting for PC"
     var onImage: ((UIImage) -> Void)?
     var onSampleBuffer: ((CMSampleBuffer) -> Void)?
@@ -86,7 +92,7 @@ final class DuoClient: NSObject {
         listener.stateUpdateHandler = { [weak self] state in
             if case .failed(let error) = state { self?.setStatus(error.localizedDescription) }
         }
-        listener.start(queue: .main)
+        listener.start(queue: networkQueue)
         self.listener = listener
     }
 
@@ -101,9 +107,11 @@ final class DuoClient: NSObject {
     private func accept(_ connection: NWConnection) {
         self.connection?.cancel()
         self.connection = connection
-        connection.start(queue: .main)
+        connection.start(queue: networkQueue)
         setStatus("Connected")
-        sendHello()
+        DispatchQueue.main.async { [weak self] in
+            self?.sendHello()
+        }
         receive()
     }
 
@@ -131,21 +139,46 @@ final class DuoClient: NSObject {
             guard let self else { return }
             if isComplete || error != nil {
                 self.setStatus("Waiting for PC")
-                self.receive()
                 return
             }
+            self.receive()
             do {
-                if let data {
-                    for frame in try self.parser.append(data) {
-                        self.handle(frame)
-                    }
+                guard let data else { return }
+                let frames = try self.parser.append(data)
+                for frame in frames where frame.type == .ping {
+                    self.handle(frame)
                 }
-                self.receive()
+                for frame in frames where frame.type != .ping {
+                    self.handle(frame)
+                }
             } catch {
                 self.setStatus(error.localizedDescription)
                 self.connection?.cancel()
             }
         }
+    }
+
+    private func applyConfig(_ payload: Data) {
+        guard payload.count >= 11 else { return }
+        let codec = payload[0]
+        if codec == 1 {
+            self.codec = .jpeg
+            setStatus("Streaming JPEG")
+            return
+        }
+        guard codec == 2 else { return }
+        self.codec = .h264
+        h264Format = nil
+        if payload.count > 11 {
+            let parameterLength = payload.subdata(in: 7..<11).reduce(UInt32(0)) {
+                ($0 << 8) | UInt32($1)
+            }
+            let available = payload.count - 11
+            if parameterLength > 0, available >= Int(parameterLength) {
+                applyParameterSets(payload.subdata(in: 11..<(11 + Int(parameterLength))))
+            }
+        }
+        setStatus("Streaming H.264")
     }
 
     private func applyParameterSets(_ annexB: Data) {
@@ -291,29 +324,20 @@ final class DuoClient: NSObject {
             }
             let data = Data(frame.payload.dropFirst(8))
             if self.codec == .h264 {
-                decodeH264(data, timestampNs: timestamp)
+                submitVideo(data, timestamp: timestamp)
             } else if let image = UIImage(data: data) {
                 DispatchQueue.main.async { self.onImage?(image) }
             }
         case .config:
             guard frame.payload.count >= 11 else { return }
-            let codec = frame.payload[0]
-            if codec == 1 {
-                self.codec = .jpeg
-                setStatus("Streaming JPEG")
-            } else if codec == 2 {
-                self.codec = .h264
-                self.h264Format = nil
-                if frame.payload.count > 11 {
-                    let parameterLength = frame.payload.subdata(in: 7..<11).reduce(UInt32(0)) {
-                        ($0 << 8) | UInt32($1)
-                    }
-                    let available = frame.payload.count - 11
-                    if parameterLength > 0, available >= Int(parameterLength) {
-                        applyParameterSets(frame.payload.subdata(in: 11..<(11 + Int(parameterLength))))
-                    }
-                }
-                setStatus("Streaming H.264")
+            let payload = frame.payload
+            if payload[0] == 1 {
+                codec = .jpeg
+            } else if payload[0] == 2 {
+                codec = .h264
+            }
+            decodeQueue.async { [weak self] in
+                self?.applyConfig(payload)
             }
 
         case .ping:
@@ -343,6 +367,37 @@ final class DuoClient: NSObject {
         }
         payload.append(pen ? 1 : 0)
         send(DuoFrame(type: .input, flags: 0, payload: payload))
+    }
+
+    private func submitVideo(_ annexB: Data, timestamp: UInt64) {
+        videoLock.lock()
+        queuedAnnexB = annexB
+        queuedTimestamp = timestamp
+        let schedule = !decodeScheduled
+        decodeScheduled = true
+        videoLock.unlock()
+        guard schedule else { return }
+        decodeQueue.async { [weak self] in
+            self?.drainVideo()
+        }
+    }
+
+    private func drainVideo() {
+        while true {
+            videoLock.lock()
+            let annexB = queuedAnnexB
+            let timestamp = queuedTimestamp
+            queuedAnnexB = nil
+            if annexB == nil {
+                decodeScheduled = false
+                videoLock.unlock()
+                return
+            }
+            videoLock.unlock()
+            if let annexB {
+                decodeH264(annexB, timestampNs: timestamp)
+            }
+        }
     }
 
     private func setStatus(_ value: String) {

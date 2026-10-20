@@ -103,11 +103,19 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                 encoded = encoder.encode(image, keyframe=controller.consume_keyframe_request())
                 if encoded is None:
                     controller.tick()
+                    if not controller.connected:
+                        break
                     continue
                 if isinstance(encoder, FfmpegEncoder):
                     controller.announce_parameter_sets(encoder.parameter_sets)
-                controller.send_frame(encoded, capture_ns)
+                try:
+                    controller.send_frame(encoded, capture_ns)
+                except OSError as error:
+                    LOG.warning("iPad link lost: %s", error)
+                    break
                 controller.tick()
+                if not controller.connected:
+                    break
                 if controller.sender is not None and time.monotonic() - last_metrics >= 2:
                     metrics = controller.sender.telemetry.snapshot()
                     LOG.info(

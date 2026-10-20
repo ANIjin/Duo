@@ -2,17 +2,30 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from threading import Event, Thread
+from dataclasses import dataclass, field
+import logging
+from threading import Event, Lock, Thread
 
 from .coordinates import MonitorBounds
 from .input import InputEvent, InputInjector
 from .monitor import DisplayMode, VirtualMonitor
-from .protocol import Codec, Config, Frame, FrameStream, FrameType, Hello, Input, VideoFrame, encode_frame
+from .protocol import (
+    Codec,
+    Config,
+    Frame,
+    FrameStream,
+    FrameType,
+    Hello,
+    Input,
+    ProtocolError,
+    encode_frame,
+)
 from .session import Session
 from .stream import EncodedFrame, EncoderError
 from .sender import FrameSender
 from .transport import ByteTransport
+
+LOG = logging.getLogger("duo")
 
 
 @dataclass(slots=True)
@@ -26,6 +39,8 @@ class HostController:
     _receiver: Thread | None = None
     _receiver_stop: Event | None = None
     _config: Config | None = None
+    _io_lock: Lock = field(default_factory=Lock)
+    _send_lock: Lock = field(default_factory=Lock)
 
     def connect(self, transport: ByteTransport, hello: Hello) -> Config:
         if self.codec_preference == "jpeg":
@@ -56,31 +71,53 @@ class HostController:
             daemon=True,
         )
         self._receiver.start()
+        Thread(
+            target=self._heartbeat_loop,
+            args=(self._receiver_stop,),
+            name="duo-heartbeat",
+            daemon=True,
+        ).start()
         return config
 
+    @property
+    def connected(self) -> bool:
+        session = self.session
+        return session is not None and session.connected
+
+    def _heartbeat_loop(self, stop: Event) -> None:
+        while not stop.wait(0.25):
+            self.tick()
+
     def announce_parameter_sets(self, parameter_sets: bytes) -> None:
-        if self.session is None or self._config is None or not parameter_sets:
+        if not parameter_sets:
             return
-        if self._config.parameter_sets == parameter_sets:
-            return
-        self._config = Config(
-            self._config.codec,
-            self._config.width,
-            self._config.height,
-            self._config.fps,
-            parameter_sets,
-        )
-        self.session.transport.send(encode_frame(Frame(FrameType.CONFIG, 0, self._config.encode())))
+        with self._send_lock:
+            with self._io_lock:
+                if self.session is None or self._config is None:
+                    return
+                if self._config.parameter_sets == parameter_sets:
+                    return
+                self._config = Config(
+                    self._config.codec,
+                    self._config.width,
+                    self._config.height,
+                    self._config.fps,
+                    parameter_sets,
+                )
+                payload = encode_frame(Frame(FrameType.CONFIG, 0, self._config.encode()))
+                transport = self.session.transport
+            transport.send(payload)
 
     def consume_keyframe_request(self) -> bool:
-        requested = False
-        if self.session is not None and self.session.keyframe_requested:
-            self.session.keyframe_requested = False
-            requested = True
-        if self.sender is not None and self.sender.force_keyframe:
-            self.sender.force_keyframe = False
-            requested = True
-        return requested
+        with self._io_lock:
+            requested = False
+            if self.session is not None and self.session.keyframe_requested:
+                self.session.keyframe_requested = False
+                requested = True
+            if self.sender is not None and self.sender.force_keyframe:
+                self.sender.force_keyframe = False
+                requested = True
+            return requested
 
     def _receive_loop(self, transport: ByteTransport, stop: Event) -> None:
         parser = FrameStream()
@@ -105,33 +142,49 @@ class HostController:
                         )
                     else:
                         self.session.receive(frame)
-        except OSError:
+        except (OSError, ProtocolError) as error:
             if not stop.is_set():
+                LOG.warning("iPad input channel ended: %s", error)
                 return
 
     def send_frame(self, frame: EncodedFrame, capture_timestamp_ns: int | None = None) -> bool:
-        if self.session is None or self.sender is None:
-            return False
-        self.sender.submit(frame, capture_timestamp_ns)
-        return self.sender.send_latest(capture_timestamp_ns)
+        with self._send_lock:
+            with self._io_lock:
+                if self.session is None or self.sender is None:
+                    return False
+                sender = self.sender
+            sender.submit(frame, capture_timestamp_ns)
+            return sender.send_latest(capture_timestamp_ns)
 
     def tick(self) -> None:
-        if self.session is None:
+        with self._io_lock:
+            session = self.session
+            expired = session is not None and session.is_expired()
+        if session is None:
             return
-        if self.session.is_expired():
-            self.disconnect()
+        if expired:
+            self.disconnect("iPad link lost: no data received for 2 seconds.")
             return
-        self.session.heartbeat()
+        with self._send_lock:
+            with self._io_lock:
+                current = self.session
+            if current is not None and current.connected and not current.is_expired():
+                current.heartbeat()
 
-    def disconnect(self) -> None:
-        if self._receiver_stop is not None:
-            self._receiver_stop.set()
-        if self.session is not None:
-            self.session.close()
+    def disconnect(self, reason: str | None = None) -> None:
+        with self._io_lock:
+            if self._receiver_stop is not None:
+                self._receiver_stop.set()
+            session = self.session
             self.session = None
             self.sender = None
             self._config = None
-        if self.input_injector is not None:
-            self.input_injector.release_all()
+            injector = self.input_injector
             self.input_injector = None
+        if session is not None and reason:
+            LOG.warning("%s", reason)
+        if injector is not None:
+            injector.release_all()
+        if session is not None:
+            session.close()
         self.monitor.stop()

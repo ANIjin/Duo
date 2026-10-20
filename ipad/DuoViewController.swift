@@ -26,6 +26,7 @@ final class DuoViewController: UIViewController {
         ])
         videoLayer.videoGravity = .resize
         videoLayer.frame = view.bounds
+        configureDisplayClock()
         view.layer.addSublayer(videoLayer)
         statusLabel.textColor = .white
         statusLabel.textAlignment = .center
@@ -44,6 +45,11 @@ final class DuoViewController: UIViewController {
             if self.videoLayer.status == .failed {
                 self.videoLayer.flush()
             }
+            if let timebase = self.videoLayer.controlTimebase {
+                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                CMTimebaseSetTime(timebase, time: pts)
+                CMTimebaseSetRate(timebase, rate: 1)
+            }
             if self.videoLayer.isReadyForMoreMediaData {
                 self.videoLayer.enqueue(sample)
             } else {
@@ -53,14 +59,28 @@ final class DuoViewController: UIViewController {
             self.statusLabel.isHidden = true
         }
         client.onStatus = { [weak self] status in
+            let streaming = status.hasPrefix("Streaming")
             self?.statusLabel.text = "\(status)\nProtocol \(DuoClient.protocolVersion)\nConnect the iPad by USB."
-            self?.statusLabel.isHidden = status == "Connected"
+            self?.statusLabel.isHidden = status == "Connected" || streaming
         }
         do {
             try client.start(port: 24862)
         } catch {
             statusLabel.text = error.localizedDescription
         }
+    }
+
+    private func configureDisplayClock() {
+        var timebase: CMTimebase?
+        let status = CMTimebaseCreateWithSourceClock(
+            allocator: kCFAllocatorDefault,
+            sourceClock: CMClockGetHostTimeClock(),
+            timebaseOut: &timebase
+        )
+        guard status == noErr, let timebase else { return }
+        CMTimebaseSetTime(timebase, time: .zero)
+        CMTimebaseSetRate(timebase, rate: 1)
+        videoLayer.controlTimebase = timebase
     }
 
     override func viewDidLayoutSubviews() {
