@@ -59,6 +59,10 @@ final class DuoFrameParser {
         }
         return frames
     }
+
+    func reset() {
+        buffer.removeAll(keepingCapacity: false)
+    }
 }
 
 final class DuoClient: NSObject {
@@ -106,6 +110,13 @@ final class DuoClient: NSObject {
 
     private func accept(_ connection: NWConnection) {
         self.connection?.cancel()
+        parser.reset()
+        codec = .jpeg
+        h264Format = nil
+        videoLock.lock()
+        queuedAnnexB = nil
+        decodeScheduled = false
+        videoLock.unlock()
         self.connection = connection
         connection.start(queue: networkQueue)
         setStatus("Connected")
@@ -152,6 +163,7 @@ final class DuoClient: NSObject {
                     self.handle(frame)
                 }
             } catch {
+                self.parser.reset()
                 self.setStatus(error.localizedDescription)
                 self.connection?.cancel()
             }

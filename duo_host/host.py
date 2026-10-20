@@ -169,7 +169,10 @@ class HostController:
             with self._io_lock:
                 current = self.session
             if current is not None and current.connected and not current.is_expired():
-                current.heartbeat()
+                try:
+                    current.heartbeat()
+                except OSError as error:
+                    self.disconnect(f"iPad link lost: {error}")
 
     def disconnect(self, reason: str | None = None) -> None:
         with self._io_lock:

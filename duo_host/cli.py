@@ -62,6 +62,7 @@ def stream_session(transport, args: argparse.Namespace) -> int:
         codec_preference=args.codec,
     )
     parser = FrameStream()
+    capture = None
     try:
         deadline = time.monotonic() + 5
         hello = None
@@ -93,7 +94,11 @@ def stream_session(transport, args: argparse.Namespace) -> int:
             LOG.info("Using H.264 encoder %s", encoder.encoder)
             if encoder.warning:
                 LOG.warning("%s", encoder.warning)
-            controller.announce_parameter_sets(encoder.parameter_sets)
+            try:
+                controller.announce_parameter_sets(encoder.parameter_sets)
+            except OSError as error:
+                LOG.warning("iPad link lost: %s", error)
+                return 0
         else:
             encoder = JpegEncoder(args.jpeg_quality)
         last_metrics = time.monotonic()
@@ -132,6 +137,8 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                 encoder.close()
         return 0
     finally:
+        if capture is not None:
+            capture.close()
         controller.disconnect()
         transport.close()
 

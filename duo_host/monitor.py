@@ -124,6 +124,17 @@ class VirtualMonitor:
         if found is None:
             raise MonitorError(f"Could not locate display device for '{self.driver_name}'")
 
+        current = DevMode()
+        current.dmSize = ctypes.sizeof(DevMode)
+        if user32.EnumDisplaySettingsW(found, -1, ctypes.byref(current)):
+            current_fps = int(current.dmDisplayFrequency or mode.fps)
+            if (
+                int(current.dmPelsWidth) == mode.width
+                and int(current.dmPelsHeight) == mode.height
+                and current_fps == mode.fps
+            ):
+                return DisplayMode(mode.width, mode.height, current_fps)
+
         devmode = DevMode()
         devmode.dmSize = ctypes.sizeof(DevMode)
         devmode.dmFields = 0x00080000 | 0x00100000 | 0x00400000
@@ -216,3 +227,13 @@ class DxcamCapture:
                     yield frame
         finally:
             self._camera.stop()
+
+    def close(self) -> None:
+        camera = self._camera
+        self._camera = None
+        if camera is None:
+            return
+        try:
+            camera.release()
+        except Exception:
+            return
