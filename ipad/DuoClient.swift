@@ -71,6 +71,11 @@ final class DuoClient: NSObject {
     var onSampleBuffer: ((CMSampleBuffer) -> Void)?
     var onStatus: ((String) -> Void)?
     private var h264Format: CMVideoFormatDescription?
+    private var codec: DuoCodec = .jpeg
+
+    private enum DuoCodec {
+        case jpeg, h264
+    }
 
     func start(port: UInt16) throws {
         guard let endpoint = NWEndpoint.Port(rawValue: port) else { throw DuoClientError.invalidFrame }
@@ -141,6 +146,112 @@ final class DuoClient: NSObject {
         }
     }
 
+    private func decodeH264(_ annexB: Data, timestampNs: UInt64) {
+        let nalUnits = splitAnnexB(annexB)
+        var sps: Data?
+        var pps: Data?
+        for nal in nalUnits {
+            guard let type = nal.first.map({ $0 & 0x1F }) else { continue }
+            if type == 7 { sps = nal }
+            if type == 8 { pps = nal }
+        }
+        if h264Format == nil, let sps, let pps {
+            var description: CMVideoFormatDescription?
+            let status = sps.withUnsafeBytes { spsBytes in
+                pps.withUnsafeBytes { ppsBytes in
+                    let pointers = [
+                        spsBytes.bindMemory(to: UInt8.self).baseAddress!,
+                        ppsBytes.bindMemory(to: UInt8.self).baseAddress!,
+                    ]
+                    let sizes = [sps.count, pps.count]
+                    return CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                        allocator: kCFAllocatorDefault,
+                        parameterSetCount: 2,
+                        parameterSetPointers: pointers,
+                        parameterSetSizes: sizes,
+                        nalUnitHeaderLength: 4,
+                        formatDescriptionOut: &description
+                    )
+                }
+            }
+            guard status == noErr, let description else { return }
+            h264Format = description
+        }
+        guard let format = h264Format else { return }
+        var avcc = Data()
+        for nal in nalUnits {
+            guard let type = nal.first.map({ $0 & 0x1F }), type != 7, type != 8 else { continue }
+            var length = UInt32(nal.count).bigEndian
+            avcc.append(Data(bytes: &length, count: 4))
+            avcc.append(nal)
+        }
+        guard !avcc.isEmpty else { return }
+        var block: CMBlockBuffer?
+        let blockStatus = CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: avcc.count,
+            blockAllocator: nil,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: avcc.count,
+            flags: 0,
+            blockBufferOut: &block
+        )
+        guard blockStatus == kCMBlockBufferNoErr, let block else { return }
+        let copyStatus = avcc.withUnsafeBytes {
+            CMBlockBufferReplaceDataBytes(
+                with: $0.baseAddress,
+                blockBuffer: block,
+                offsetIntoDestination: 0,
+                dataLength: avcc.count
+            )
+        }
+        guard copyStatus == kCMBlockBufferNoErr else { return }
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 60),
+            presentationTimeStamp: CMTime(value: CMTimeValue(timestampNs), timescale: 1_000_000_000),
+            decodeTimeStamp: .invalid
+        )
+        var sample: CMSampleBuffer?
+        let sampleStatus = CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: block,
+            formatDescription: format,
+            sampleCount: 1,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 1,
+            sampleSizeArray: [avcc.count],
+            sampleBufferOut: &sample
+        )
+        if sampleStatus == noErr, let sample {
+            DispatchQueue.main.async { self.onSampleBuffer?(sample) }
+        }
+    }
+
+    private func splitAnnexB(_ data: Data) -> [Data] {
+        let bytes = [UInt8](data)
+        var starts: [Int] = []
+        var index = 0
+        while index + 3 < bytes.count {
+            if bytes[index] == 0 && bytes[index + 1] == 0 &&
+                ((bytes[index + 2] == 1) ||
+                 (bytes[index + 2] == 0 && bytes[index + 3] == 1)) {
+                starts.append(index)
+                index += bytes[index + 2] == 1 ? 3 : 4
+            } else {
+                index += 1
+            }
+        }
+        return starts.enumerated().compactMap { position, start in
+            let prefix = bytes[start + 2] == 1 ? 3 : 4
+            let end = position + 1 < starts.count ? starts[position + 1] : bytes.count
+            guard end > start + prefix else { return nil }
+            return Data(bytes[(start + prefix)..<end])
+        }
+    }
+
     private func handle(_ frame: DuoFrame) {
         switch frame.type {
         case .frame:
@@ -166,116 +277,6 @@ final class DuoClient: NSObject {
                 setStatus("Streaming H.264")
             }
 
-            private var codec: DuoCodec = .jpeg
-
-            private enum DuoCodec {
-                case jpeg, h264
-            }
-
-            private func decodeH264(_ annexB: Data, timestampNs: UInt64) {
-                let nalUnits = splitAnnexB(annexB)
-                var sps: Data?
-                var pps: Data?
-                for nal in nalUnits {
-                    guard let type = nal.first.map({ $0 & 0x1F }) else { continue }
-                    if type == 7 { sps = nal }
-                    if type == 8 { pps = nal }
-                }
-                if h264Format == nil, let sps, let pps {
-                    var description: CMVideoFormatDescription?
-                    let status = sps.withUnsafeBytes { spsBytes in
-                        pps.withUnsafeBytes { ppsBytes in
-                            let pointers = [
-                                spsBytes.bindMemory(to: UInt8.self).baseAddress!,
-                                ppsBytes.bindMemory(to: UInt8.self).baseAddress!,
-                            ]
-                            let sizes = [sps.count, pps.count]
-                            return CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                                allocator: kCFAllocatorDefault,
-                                parameterSetCount: 2,
-                                parameterSetPointers: pointers,
-                                parameterSetSizes: sizes,
-                                nalUnitHeaderLength: 4,
-                                formatDescriptionOut: &description
-                            )
-                        }
-                    }
-                    guard status == noErr, let description else { return }
-                    h264Format = description
-                }
-                guard let format = h264Format else { return }
-                var avcc = Data()
-                for nal in nalUnits where nal.first.map({ $0 & 0x1F }) != 7 && nal.first.map({ $0 & 0x1F }) != 8 {
-                    var length = UInt32(nal.count).bigEndian
-                    avcc.append(Data(bytes: &length, count: 4))
-                    avcc.append(nal)
-                }
-                guard !avcc.isEmpty else { return }
-                var block: CMBlockBuffer?
-                let blockStatus = CMBlockBufferCreateWithMemoryBlock(
-                    allocator: kCFAllocatorDefault,
-                    memoryBlock: nil,
-                    blockLength: avcc.count,
-                    blockAllocator: nil,
-                    customBlockSource: nil,
-                    offsetToData: 0,
-                    dataLength: avcc.count,
-                    flags: 0,
-                    blockBufferOut: &block
-                )
-                guard blockStatus == kCMBlockBufferNoErr, let block else { return }
-                let copyStatus = avcc.withUnsafeBytes {
-                    CMBlockBufferReplaceDataBytes(
-                        with: $0.baseAddress,
-                        blockBuffer: block,
-                        offsetIntoDestination: 0,
-                        dataLength: avcc.count
-                    )
-                }
-                guard copyStatus == kCMBlockBufferNoErr else { return }
-                var timing = CMSampleTimingInfo(
-                    duration: CMTime(value: 1, timescale: 60),
-                    presentationTimeStamp: CMTime(value: CMTimeValue(timestampNs), timescale: 1_000_000_000),
-                    decodeTimeStamp: .invalid
-                )
-                var sample: CMSampleBuffer?
-                let sampleStatus = CMSampleBufferCreateReady(
-                    allocator: kCFAllocatorDefault,
-                    dataBuffer: block,
-                    formatDescription: format,
-                    sampleCount: 1,
-                    sampleTimingEntryCount: 1,
-                    sampleTimingArray: &timing,
-                    sampleSizeEntryCount: 1,
-                    sampleSizeArray: [avcc.count],
-                    sampleBufferOut: &sample
-                )
-                if sampleStatus == noErr, let sample {
-                    DispatchQueue.main.async { self.onSampleBuffer?(sample) }
-                }
-            }
-
-            private func splitAnnexB(_ data: Data) -> [Data] {
-                let bytes = [UInt8](data)
-                var starts: [Int] = []
-                var index = 0
-                while index + 3 < bytes.count {
-                    if bytes[index] == 0 && bytes[index + 1] == 0 &&
-                        ((bytes[index + 2] == 1) ||
-                         (bytes[index + 2] == 0 && index + 3 < bytes.count && bytes[index + 3] == 1)) {
-                        starts.append(index)
-                        index += bytes[index + 2] == 1 ? 3 : 4
-                    } else {
-                        index += 1
-                    }
-                }
-                return starts.enumerated().compactMap { position, start in
-                    let prefix = bytes[start + 2] == 1 ? 3 : 4
-                    let end = position + 1 < starts.count ? starts[position + 1] : bytes.count
-                    guard end > start + prefix else { return nil }
-                    return Data(bytes[(start + prefix)..<end])
-                }
-            }
         case .ping:
             send(DuoFrame(type: .pong, flags: 0, payload: frame.payload))
         case .bye:
