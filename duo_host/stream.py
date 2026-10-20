@@ -144,9 +144,9 @@ class FfmpegEncoder:
             context.framerate = Fraction(self.fps, 1)
             context.time_base = Fraction(1, self.fps)
             context.bit_rate = self.bitrate
-            context.gop_size = max(self.fps * 60, 1)
+            context.gop_size = max(self.fps, 1)
             context.max_b_frames = 0
-            context.options = self._options(name)
+            context.options = self._options(name, self.fps)
             try:
                 context.open()
             except Exception as error:
@@ -157,7 +157,7 @@ class FfmpegEncoder:
         raise EncoderError(f"No usable H.264 encoder. {detail}")
 
     @staticmethod
-    def _options(name: str) -> dict[str, str]:
+    def _options(name: str, fps: int) -> dict[str, str]:
         if name == "h264_amf":
             return {
                 "usage": "ultralowlatency",
@@ -171,6 +171,10 @@ class FfmpegEncoder:
                 "level": "5.1",
                 "preanalysis": "0",
                 "latency": "1",
+                # Intra refresh paints a new frame in bands over the old one.
+                "intra_refresh_mb": "0",
+                "frame_skipping": "0",
+                "header_spacing": str(max(fps, 1)),
             }
         if name == "h264_nvenc":
             return {
