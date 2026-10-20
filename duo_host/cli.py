@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=24862)
     parser.add_argument("--monitor-index", type=int, default=1)
     parser.add_argument("--max-fps", type=int, default=60)
-    parser.add_argument("--jpeg-quality", type=int, default=55)
+    parser.add_argument("--jpeg-quality", type=int, default=40)
     parser.add_argument("--driver-name", default="Virtual Display Driver")
     parser.add_argument("--once", action="store_true", help="Exit after the first disconnect")
     return parser
@@ -63,6 +63,13 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                 if frame.message_type != FrameType.HELLO:
                     raise ProtocolError("The first iPad message must be HELLO")
                 hello = Hello.decode(frame.payload)
+                LOG.info(
+                    "iPad HELLO: %sx%s @ %s fps (scale %.2f)",
+                    hello.width,
+                    hello.height,
+                    hello.max_fps,
+                    hello.scale,
+                )
                 break
         if hello is None:
             raise TransportError("Timed out waiting for the iPad HELLO message.")

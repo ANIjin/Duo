@@ -49,7 +49,7 @@ class LatestFrame:
 class JpegEncoder:
     codec = Codec.JPEG
 
-    def __init__(self, quality: int = 55) -> None:
+    def __init__(self, quality: int = 40) -> None:
         if not 20 <= quality <= 95:
             raise ValueError("JPEG quality must be between 20 and 95")
         self.quality = quality
@@ -65,7 +65,14 @@ class JpegEncoder:
             except (AttributeError, TypeError, ValueError) as error:
                 raise EncoderError("JPEG encoder requires a Pillow Image or BGR array") from error
         output = io.BytesIO()
-        image.save(output, format="JPEG", quality=self.quality, optimize=False)
+        image.save(
+            output,
+            format="JPEG",
+            quality=self.quality,
+            subsampling=2,
+            optimize=False,
+            progressive=False,
+        )
         return EncodedFrame(output.getvalue(), True)
 
 

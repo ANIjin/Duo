@@ -48,7 +48,7 @@ on macOS for signing and device testing.
    The default driver name is `Virtual Display Driver` (MikeTheTech's driver).
    Use `--driver-name` if a different IddCx driver is installed.
    Use `--monitor-index` if the virtual monitor is not Windows display index 1.
-   JPEG quality defaults to 55 to reduce USB latency; increase it if image
+   JPEG quality defaults to 40 to reduce USB latency; increase it if image
    quality is more important than responsiveness:
 
    ```powershell
@@ -64,6 +64,9 @@ on macOS for signing and device testing.
    monitor's configured refresh rate. A 60 Hz monitor can show less than 60
    streamed frames per second if JPEG encoding or USB transfer is the
    bottleneck.
+   The startup log includes the iPad HELLO dimensions. With the current iPad
+   build it should say `2360x1640`; if it says `2048x1536`, rebuild and
+   sideload the latest IPA because that is an older client build.
    Use `--once` to exit instead of retrying when the iPad is unavailable.
 
 If the host reports a usbmux import error, install the runtime package into

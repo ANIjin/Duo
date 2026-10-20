@@ -12,7 +12,7 @@ final class DuoViewController: UIViewController {
         view.backgroundColor = .black
         view.insetsLayoutMarginsFromSafeArea = false
         additionalSafeAreaInsets = .zero
-        imageView.contentMode = .scaleAspectFill
+        imageView.contentMode = .scaleToFill
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(imageView)
