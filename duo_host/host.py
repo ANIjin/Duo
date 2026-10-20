@@ -57,6 +57,7 @@ class HostController:
         requested = DisplayMode(max(hello.width, hello.height), min(hello.width, hello.height), fps)
         self.session = Session.start(transport)
         self.sender = FrameSender(transport)
+        self.sender.start()
         self._receiver_stop = Event()
         self._receiver = Thread(
             target=self._receive_loop,
@@ -161,13 +162,12 @@ class HostController:
                 return
 
     def send_frame(self, frame: EncodedFrame, capture_timestamp_ns: int | None = None) -> bool:
-        with self._send_lock:
-            with self._io_lock:
-                if self.session is None or self.sender is None:
-                    return False
-                sender = self.sender
-            sender.submit(frame, capture_timestamp_ns)
-            return sender.send_latest(capture_timestamp_ns)
+        with self._io_lock:
+            if self.session is None or self.sender is None:
+                return False
+            sender = self.sender
+        sender.submit(frame, capture_timestamp_ns)
+        return True
 
     def tick(self) -> None:
         with self._io_lock:
@@ -192,6 +192,7 @@ class HostController:
             if self._receiver_stop is not None:
                 self._receiver_stop.set()
             session = self.session
+            sender = self.sender
             self.session = None
             self.sender = None
             self._config = None
@@ -199,6 +200,8 @@ class HostController:
             self.input_injector = None
         if session is not None and reason:
             LOG.warning("%s", reason)
+        if sender is not None:
+            sender.close()
         if injector is not None:
             injector.release_all()
         if session is not None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Lock
 import asyncio
 import socket
 import time
@@ -22,9 +23,15 @@ class ByteTransport(Protocol):
 class SocketTransport:
     def __init__(self, connection: socket.socket) -> None:
         self.connection = connection
+        self._send_lock = Lock()
+        try:
+            connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            return
 
     def send(self, data: bytes) -> None:
-        self.connection.sendall(data)
+        with self._send_lock:
+            self.connection.sendall(data)
 
     def recv(self, size: int = 65536) -> bytes:
         return self.connection.recv(size)

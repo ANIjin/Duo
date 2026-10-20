@@ -124,6 +124,7 @@ class FfmpegEncoder:
         self.width, self.height, self.fps, self.bitrate = width, height, fps, bitrate
         self._context, self.encoder = self._open()
         self._pts = 0
+        self._bgra = None
         self.parameter_sets = annexb_parameter_sets(bytes(self._context.extradata or b""))
 
     def _open(self):
@@ -140,7 +141,9 @@ class FfmpegEncoder:
             context = av.CodecContext.create(name, "w")
             context.width = self.width
             context.height = self.height
-            context.pix_fmt = "yuv420p"
+            # AMF can take BGRA and convert it on the GPU. A CPU YUV conversion
+            # of a 2360x1640 frame costs as much as the encode itself.
+            context.pix_fmt = "bgra" if name == "h264_amf" else "yuv420p"
             context.framerate = Fraction(self.fps, 1)
             context.time_base = Fraction(1, self.fps)
             context.bit_rate = self.bitrate
@@ -224,7 +227,15 @@ class FfmpegEncoder:
             )
         import av
 
-        frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(array), format="bgr24")
+        array = np.ascontiguousarray(array)
+        if self.encoder == "h264_amf":
+            if self._bgra is None or self._bgra.shape[0] != array.shape[0] or self._bgra.shape[1] != array.shape[1]:
+                self._bgra = np.empty((array.shape[0], array.shape[1], 4), dtype=np.uint8)
+                self._bgra[:, :, 3] = 255
+            self._bgra[:, :, :3] = array
+            frame = av.VideoFrame.from_ndarray(self._bgra, format="bgra")
+        else:
+            frame = av.VideoFrame.from_ndarray(array, format="bgr24")
         frame.pts = self._pts
         self._pts += 1
         if keyframe:
