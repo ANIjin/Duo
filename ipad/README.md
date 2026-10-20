@@ -15,3 +15,7 @@ The resulting artifact is not installable on an iPad as-is: Apple requires
 code signing and provisioning for device installation. Sign the extracted
 `Payload/DuoClient.app` with an Apple ID/development profile, AltStore, or
 another sideloading tool before installing it.
+
+The app bundle must retain `CFBundleExecutable=$(EXECUTABLE_NAME)` in
+`DuoClient/Info.plist`; without it, Sideloadly reports
+`MissingBundleExecutable` and refuses the IPA.
