@@ -149,5 +149,8 @@ def _capture(monitor_index: int, device_name: str | None):
 
 
 def main() -> int:
+    from .monitor import use_physical_screen_coordinates
+
+    use_physical_screen_coordinates()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     return run(build_parser().parse_args())

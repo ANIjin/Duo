@@ -17,6 +17,33 @@ from .coordinates import MonitorBounds
 
 LOG = logging.getLogger("duo.monitor")
 
+# DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2. Touch injection uses the same
+# pixels as the captured frame only after the process opts into this.
+_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+
+
+def use_physical_screen_coordinates() -> None:
+    """Make monitor rectangles and touch injection use physical pixels."""
+
+    if not hasattr(ctypes, "WinDLL"):
+        return
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
+    if user32.SetProcessDpiAwarenessContext(_PER_MONITOR_AWARE_V2):
+        return
+    error = ctypes.get_last_error()
+    user32.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+    user32.AreDpiAwarenessContextsEqual.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    user32.AreDpiAwarenessContextsEqual.restype = wintypes.BOOL
+    current = user32.GetThreadDpiAwarenessContext()
+    if not user32.AreDpiAwarenessContextsEqual(current, _PER_MONITOR_AWARE_V2):
+        LOG.warning(
+            "Could not enable physical screen coordinates (WinError %s). "
+            "Touches can land on the laptop screen.",
+            error,
+        )
+
 
 class MonitorError(RuntimeError):
     """Raised when the configured virtual display driver is unavailable."""
