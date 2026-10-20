@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 import logging
 from threading import Event, Lock, Thread
 
-from .coordinates import MonitorBounds
 from .input import InputEvent, InputInjector
 from .monitor import DisplayMode, VirtualMonitor
 from .protocol import (
@@ -61,7 +60,15 @@ class HostController:
         self._config = config
         self.session = Session.start(transport)
         self.sender = FrameSender(transport)
-        self.input_injector = InputInjector(MonitorBounds(0, 0, actual.width, actual.height))
+        touch_bounds = self.monitor.input_bounds()
+        LOG.info(
+            "Touch target %sx%s at %s,%s",
+            touch_bounds.width,
+            touch_bounds.height,
+            touch_bounds.left,
+            touch_bounds.top,
+        )
+        self.input_injector = InputInjector(touch_bounds)
         transport.send(encode_frame(Frame(FrameType.CONFIG, 0, config.encode())))
         self._receiver_stop = Event()
         self._receiver = Thread(
@@ -130,16 +137,19 @@ class HostController:
                     if frame.message_type == FrameType.INPUT and self.input_injector is not None:
                         event = Input.decode(frame.payload)
                         phases = ("began", "moved", "ended", "cancelled")
-                        self.input_injector.inject(
-                            InputEvent(
-                                event.contact_id,
-                                event.x,
-                                event.y,
-                                phases[event.phase] if event.phase < len(phases) else "cancelled",
-                                event.pressure,
-                                event.pen,
+                        try:
+                            self.input_injector.inject(
+                                InputEvent(
+                                    event.contact_id,
+                                    event.x,
+                                    event.y,
+                                    phases[event.phase] if event.phase < len(phases) else "cancelled",
+                                    event.pressure,
+                                    event.pen,
+                                )
                             )
-                        )
+                        except (OSError, ValueError) as error:
+                            LOG.warning("Touch injection failed: %s", error)
                     else:
                         self.session.receive(frame)
         except (OSError, ProtocolError) as error:

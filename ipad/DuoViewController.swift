@@ -12,6 +12,7 @@ final class DuoViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        view.isMultipleTouchEnabled = true
         view.insetsLayoutMarginsFromSafeArea = false
         additionalSafeAreaInsets = .zero
         imageView.contentMode = .scaleToFill

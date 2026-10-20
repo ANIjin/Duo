@@ -12,6 +12,8 @@ import logging
 import subprocess
 from ctypes import wintypes
 
+from .coordinates import MonitorBounds
+
 LOG = logging.getLogger("duo.monitor")
 
 
@@ -24,12 +26,70 @@ class DisplayMode:
     width: int
     height: int
     fps: int
+    left: int = 0
+    top: int = 0
+
+
+def _screen_rect(device_name: str) -> MonitorBounds | None:
+    """Monitor rectangle in this process's coordinate space, or None."""
+
+    if not device_name or not hasattr(ctypes, "windll"):
+        return None
+
+    class _Rect(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    class _MonitorInfoEx(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", _Rect),
+            ("rcWork", _Rect),
+            ("dwFlags", wintypes.DWORD),
+            ("szDevice", wintypes.WCHAR * 32),
+        ]
+
+    callback_type = ctypes.WINFUNCTYPE(
+        wintypes.BOOL,
+        wintypes.HMONITOR,
+        wintypes.HDC,
+        ctypes.POINTER(_Rect),
+        wintypes.LPARAM,
+    )
+    found: dict[str, tuple[int, int, int, int]] = {}
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MonitorInfoEx)]
+    user32.GetMonitorInfoW.restype = wintypes.BOOL
+
+    def _visit(monitor, hdc, rect, data):
+        info = _MonitorInfoEx()
+        info.cbSize = ctypes.sizeof(_MonitorInfoEx)
+        if user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            box = info.rcMonitor
+            found[str(info.szDevice)] = (int(box.left), int(box.top), int(box.right - box.left), int(box.bottom - box.top))
+        return True
+
+    callback = callback_type(_visit)
+    user32.EnumDisplayMonitors.argtypes = [wintypes.HDC, ctypes.POINTER(_Rect), callback_type, wintypes.LPARAM]
+    user32.EnumDisplayMonitors.restype = wintypes.BOOL
+    if not user32.EnumDisplayMonitors(None, None, callback, 0):
+        return None
+    target = device_name.casefold()
+    for name, (left, top, width, height) in found.items():
+        if name.casefold() == target and width > 0 and height > 0:
+            return MonitorBounds(left, top, width, height)
+    return None
 
 
 class VirtualMonitor:
     def __init__(self, driver_name: str = "IddSampleDriver") -> None:
         self.driver_name = driver_name
         self.mode: DisplayMode | None = None
+        self.device_name: str | None = None
         self.started = False
 
     def ensure_driver(self) -> None:
@@ -123,6 +183,7 @@ class VirtualMonitor:
             display.cb = ctypes.sizeof(DisplayDevice)
         if found is None:
             raise MonitorError(f"Could not locate display device for '{self.driver_name}'")
+        self.device_name = str(found)
 
         current = DevMode()
         current.dmSize = ctypes.sizeof(DevMode)
@@ -133,7 +194,13 @@ class VirtualMonitor:
                 and int(current.dmPelsHeight) == mode.height
                 and current_fps == mode.fps
             ):
-                return DisplayMode(mode.width, mode.height, current_fps)
+                return DisplayMode(
+                    mode.width,
+                    mode.height,
+                    current_fps,
+                    int(current.dmPositionX),
+                    int(current.dmPositionY),
+                )
 
         devmode = DevMode()
         devmode.dmSize = ctypes.sizeof(DevMode)
@@ -151,6 +218,8 @@ class VirtualMonitor:
                     int(current.dmPelsWidth),
                     int(current.dmPelsHeight),
                     int(current.dmDisplayFrequency or mode.fps),
+                    int(current.dmPositionX),
+                    int(current.dmPositionY),
                 )
             supported = []
             mode_index = 0
@@ -165,6 +234,8 @@ class VirtualMonitor:
                             int(candidate.dmPelsWidth),
                             int(candidate.dmPelsHeight),
                             int(candidate.dmDisplayFrequency or mode.fps),
+                            int(candidate.dmPositionX),
+                            int(candidate.dmPositionY),
                         )
                     )
                 mode_index += 1
@@ -202,7 +273,30 @@ class VirtualMonitor:
                 f"Virtual display driver rejected {mode.width}x{mode.height}@{mode.fps} Hz "
                 f"(ChangeDisplaySettingsEx result {result})"
             )
-        return mode
+        return DisplayMode(
+            mode.width,
+            mode.height,
+            mode.fps,
+            int(current.dmPositionX),
+            int(current.dmPositionY),
+        )
+
+    def input_bounds(self) -> MonitorBounds:
+        """Return the virtual monitor rectangle in this process's screen coordinates.
+
+        Touch injection uses the same coordinate space as ``GetMonitorInfo``.
+        That rectangle can be smaller than the captured mode when Windows is
+        scaling the display.
+        """
+
+        rect = _screen_rect(self.device_name) if self.device_name else None
+        if rect is not None:
+            return rect
+        LOG.warning("Touch could not find monitor %s; using the display mode origin.", self.device_name)
+        mode = self.mode
+        if mode is None:
+            return MonitorBounds(0, 0, 1, 1)
+        return MonitorBounds(mode.left, mode.top, mode.width, mode.height)
 
     def stop(self) -> None:
         self.started = False
