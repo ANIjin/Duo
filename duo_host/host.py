@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
+import time
 from threading import Event, Lock, Thread
 
 from .input import InputEvent, InputInjector
@@ -40,6 +41,7 @@ class HostController:
     _config: Config | None = None
     _io_lock: Lock = field(default_factory=Lock)
     _send_lock: Lock = field(default_factory=Lock)
+    _timeout_paused: bool = False
 
     def connect(self, transport: ByteTransport, hello: Hello) -> Config:
         if self.codec_preference == "jpeg":
@@ -96,6 +98,42 @@ class HostController:
     def _heartbeat_loop(self, stop: Event) -> None:
         while not stop.wait(0.25):
             self.tick()
+
+    def keep_alive(self) -> None:
+        """Treat the link as healthy while the host is busy opening the encoder.
+
+        A Quick Sync open can take longer than the 2 second receive timeout.
+        Heartbeats still run, and this covers the gap when a reply is late.
+        """
+
+        with self._io_lock:
+            if self.session is not None and self.session.connected:
+                self.session.last_rx = time.monotonic()
+
+    def pause_timeout(self) -> None:
+        """Ignore receive timeouts while a blocking encoder open holds the GIL."""
+
+        with self._io_lock:
+            self._timeout_paused = True
+
+    def resume_timeout(self) -> None:
+        with self._io_lock:
+            self._timeout_paused = False
+            if self.session is not None and self.session.connected:
+                self.session.last_rx = time.monotonic()
+
+    def set_frame_size(self, width: int, height: int) -> None:
+        """Publish a new encoded size without moving the virtual display.
+
+        The desktop stays at the iPad's resolution. Only the H.264 frame gets
+        smaller, and the iPad stretches it back to the screen.
+        """
+
+        with self._io_lock:
+            if self._config is None:
+                return
+            self._config = Config(self._config.codec, width, height, self._config.fps, b"")
+        self.keep_alive()
 
     def announce_parameter_sets(self, parameter_sets: bytes) -> None:
         if not parameter_sets:
@@ -172,7 +210,8 @@ class HostController:
     def tick(self) -> None:
         with self._io_lock:
             session = self.session
-            expired = session is not None and session.is_expired()
+            paused = self._timeout_paused
+            expired = session is not None and not paused and session.is_expired()
         if session is None:
             return
         if expired:

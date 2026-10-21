@@ -112,11 +112,96 @@ def _screen_rect(device_name: str) -> MonitorBounds | None:
     return None
 
 
+def _attach_virtual_display(device_name: str, width: int, height: int, fps: int) -> None:
+    """Turn an inactive virtual display on at ``width`` x ``height``.
+
+    SetDisplayConfig alone returns ERROR_INVALID_PARAMETER while the device is
+    off the desktop. ChangeDisplaySettingsEx can attach it first.
+    """
+
+    class DevMode(ctypes.Structure):
+        _fields_ = [
+            ("dmDeviceName", wintypes.WCHAR * 32),
+            ("dmSpecVersion", wintypes.WORD),
+            ("dmDriverVersion", wintypes.WORD),
+            ("dmSize", wintypes.WORD),
+            ("dmDriverExtra", wintypes.WORD),
+            ("dmFields", wintypes.DWORD),
+            ("dmPositionX", wintypes.LONG),
+            ("dmPositionY", wintypes.LONG),
+            ("dmDisplayOrientation", wintypes.DWORD),
+            ("dmDisplayFixedOutput", wintypes.DWORD),
+            ("dmColor", wintypes.SHORT),
+            ("dmDuplex", wintypes.SHORT),
+            ("dmYResolution", wintypes.SHORT),
+            ("dmTTOption", wintypes.SHORT),
+            ("dmCollate", wintypes.SHORT),
+            ("dmFormName", wintypes.WCHAR * 32),
+            ("dmLogPixels", wintypes.WORD),
+            ("dmBitsPerPel", wintypes.DWORD),
+            ("dmPelsWidth", wintypes.DWORD),
+            ("dmPelsHeight", wintypes.DWORD),
+            ("dmDisplayFlags", wintypes.DWORD),
+            ("dmDisplayFrequency", wintypes.DWORD),
+            ("dmICMMethod", wintypes.DWORD),
+            ("dmICMIntent", wintypes.DWORD),
+            ("dmMediaType", wintypes.DWORD),
+            ("dmDitherType", wintypes.DWORD),
+            ("dmReserved1", wintypes.DWORD),
+            ("dmReserved2", wintypes.DWORD),
+            ("dmPanningWidth", wintypes.DWORD),
+            ("dmPanningHeight", wintypes.DWORD),
+        ]
+
+    user32 = ctypes.windll.user32
+    chosen = None
+    index = 0
+    while True:
+        candidate = DevMode()
+        candidate.dmSize = ctypes.sizeof(DevMode)
+        if not user32.EnumDisplaySettingsW(device_name, index, ctypes.byref(candidate)):
+            break
+        if (
+            int(candidate.dmPelsWidth) == width
+            and int(candidate.dmPelsHeight) == height
+            and int(candidate.dmDisplayFrequency or fps) == fps
+        ):
+            chosen = candidate
+            break
+        index += 1
+    if chosen is None:
+        chosen = DevMode()
+        chosen.dmSize = ctypes.sizeof(DevMode)
+        if not user32.EnumDisplaySettingsW(device_name, -1, ctypes.byref(chosen)):
+            raise MonitorError(f"Windows has no mode list for {device_name}")
+        chosen.dmPelsWidth = width
+        chosen.dmPelsHeight = height
+        chosen.dmDisplayFrequency = fps
+        chosen.dmBitsPerPel = 32
+    primary_width = ctypes.windll.user32.GetSystemMetrics(0)
+    chosen.dmPositionX = int(primary_width)
+    chosen.dmPositionY = 0
+    chosen.dmFields = 0x20 | 0x40000 | 0x80000 | 0x100000 | 0x400000
+    CDS_UPDATEREGISTRY = 0x00000001
+    CDS_NORESET = 0x10000000
+    CDS_RESET = 0x40000000
+    status = user32.ChangeDisplaySettingsExW(
+        device_name, ctypes.byref(chosen), None, CDS_UPDATEREGISTRY | CDS_NORESET, None
+    )
+    if status != 0:
+        raise MonitorError(
+            f"Windows could not attach {device_name} at {width}x{height}@{fps} "
+            f"(ChangeDisplaySettingsEx error {status})"
+        )
+    user32.ChangeDisplaySettingsExW(None, None, None, CDS_RESET, None)
+    LOG.info("Attached %s at %sx%s beside the primary display", device_name, width, height)
+
+
 def _place_virtual_mode(device_name: str, width: int, height: int, fps: int) -> None:
     """Extend ``device_name`` onto the desktop at ``width`` x ``height``.
 
-    ChangeDisplaySettingsEx fails for this indirect display. The display
-    configuration API can place it to the right of the existing desktop.
+    Prefer SetDisplayConfig once the display is already on the desktop. Use
+    :func:`_attach_virtual_display` first when it is inactive.
     """
 
     class _Luid(ctypes.Structure):
@@ -313,7 +398,7 @@ class VirtualMonitor:
             "Install the signed IddCx virtual display driver before starting."
         )
 
-    def start(self, mode: DisplayMode) -> None:
+    def start(self, mode: DisplayMode) -> DisplayMode:
         self.ensure_driver()
         self.mode = self._apply_mode(mode)
         self.started = True
@@ -400,6 +485,26 @@ class VirtualMonitor:
                 int(current.dmPositionX),
                 int(current.dmPositionY),
             )
+
+        # An inactive virtual display has no desktop path yet. Attach it with
+        # ChangeDisplaySettingsEx before SetDisplayConfig can place the mode.
+        if _screen_rect(self.device_name) is None:
+            _attach_virtual_display(found, mode.width, mode.height, mode.fps)
+            current = DevMode()
+            current.dmSize = ctypes.sizeof(DevMode)
+            if (
+                user32.EnumDisplaySettingsW(found, -1, ctypes.byref(current))
+                and int(current.dmPelsWidth) == mode.width
+                and int(current.dmPelsHeight) == mode.height
+                and _screen_rect(self.device_name) is not None
+            ):
+                return DisplayMode(
+                    int(current.dmPelsWidth),
+                    int(current.dmPelsHeight),
+                    int(current.dmDisplayFrequency or mode.fps),
+                    int(current.dmPositionX),
+                    int(current.dmPositionY),
+                )
 
         supported: list[DisplayMode] = []
         mode_index = 0
@@ -496,7 +601,9 @@ class DxcamCapture:
         if output_index is None:
             output_index = monitor_index
         try:
-            self._camera = dxcam.create(output_idx=output_index, output_color="BGR")
+            # BGRA is the DXGI buffer format. Asking dxcam for BGR makes it
+            # import OpenCV, which is not part of the host install.
+            self._camera = dxcam.create(output_idx=output_index, output_color="BGRA")
         except IndexError as error:
             raise MonitorError(
                 f"Virtual display {device_name or output_index} is not on the desktop, "
@@ -507,7 +614,10 @@ class DxcamCapture:
         self._camera.start(target_fps=target_fps, video_mode=True)
         try:
             while True:
-                frame = self._camera.get_latest_frame()
+                # The capture thread keeps an 8-frame ring. Encoding finishes
+                # before that slot is reused, so skipping this copy stays under
+                # a 60 fps frame budget at 2360x1640.
+                frame = self._camera.get_latest_frame(copy=False)
                 if frame is not None:
                     yield frame
         finally:

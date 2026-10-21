@@ -9,10 +9,25 @@ import time
 from .host import HostController
 from .monitor import MonitorError, VirtualMonitor
 from .protocol import FrameStream, FrameType, Hello, ProtocolError
-from .stream import EncodedFrame, EncoderError, FfmpegEncoder, JpegEncoder
+from .stream import EncodeWindow, EncoderError, FfmpegEncoder, JpegEncoder, next_stream_size
 from .transport import ReconnectPolicy, TransportError, UsbmuxTransportFactory
 
 LOG = logging.getLogger("duo")
+
+
+def _open_h264_encoder(controller: HostController, width: int, height: int, fps: int) -> FfmpegEncoder:
+    """Open H.264 without letting the 2 second receive timeout kill the link.
+
+    Quick Sync open can hold the GIL for several seconds. A background
+    heartbeat would otherwise see no iPad traffic and drop the session.
+    """
+
+    controller.pause_timeout()
+    try:
+        encoder = FfmpegEncoder(width, height, fps)
+    finally:
+        controller.resume_timeout()
+    return encoder
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,8 +104,9 @@ def stream_session(transport, args: argparse.Namespace) -> int:
         config = controller.connect(transport, hello)
         LOG.info("Connected: %sx%s at %s fps using %s", config.width, config.height, config.fps, config.codec.name)
         capture = _capture(args.monitor_index, controller.monitor.device_name)
+        controller.keep_alive()
         if config.codec.name == "H264":
-            encoder = FfmpegEncoder(config.width, config.height, config.fps)
+            encoder = _open_h264_encoder(controller, config.width, config.height, config.fps)
             LOG.info("Using H.264 encoder %s", encoder.encoder)
             if encoder.warning:
                 LOG.warning("%s", encoder.warning)
@@ -98,14 +114,23 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                 controller.announce_parameter_sets(encoder.parameter_sets)
             except OSError as error:
                 LOG.warning("iPad link lost: %s", error)
+                encoder.close()
                 return 0
         else:
             encoder = JpegEncoder(args.jpeg_quality)
+        pace = EncodeWindow(config.fps)
         last_metrics = time.monotonic()
+        encode_ms = 0.0
+        encode_max = 0.0
         try:
             for image in capture.frames(config.fps):
+                if not controller.connected:
+                    break
                 capture_ns = time.monotonic_ns()
+                encode_started = time.perf_counter()
                 encoded = encoder.encode(image, keyframe=controller.consume_keyframe_request())
+                encode_ms = (time.perf_counter() - encode_started) * 1000
+                encode_max = max(encode_max, encode_ms)
                 if encoded is None:
                     controller.tick()
                     if not controller.connected:
@@ -113,6 +138,32 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                     continue
                 if isinstance(encoder, FfmpegEncoder):
                     controller.announce_parameter_sets(encoder.parameter_sets)
+                    late = pace.observe(encode_ms)
+                    if late is not None and encoder._pix_fmt == "nv12":
+                        smaller = next_stream_size(encoder.width, encoder.height, late, config.fps)
+                        if smaller is None:
+                            pace.give_up()
+                        else:
+                            LOG.info(
+                                "Encode is %.0f ms at %sx%s. Scaling the stream "
+                                "to %sx%s to hold %s fps.",
+                                late,
+                                encoder.width,
+                                encoder.height,
+                                smaller[0],
+                                smaller[1],
+                                config.fps,
+                            )
+                            encoder.close()
+                            encoder = _open_h264_encoder(
+                                controller, smaller[0], smaller[1], config.fps
+                            )
+                            controller.set_frame_size(encoder.width, encoder.height)
+                            controller.announce_parameter_sets(encoder.parameter_sets)
+                            if controller.sender is not None:
+                                controller.sender.force_keyframe = True
+                            pace = EncodeWindow(config.fps)
+                            continue
                 try:
                     controller.send_frame(encoded, capture_ns)
                 except OSError as error:
@@ -124,13 +175,17 @@ def stream_session(transport, args: argparse.Namespace) -> int:
                 if controller.sender is not None and time.monotonic() - last_metrics >= 2:
                     metrics = controller.sender.telemetry.snapshot()
                     LOG.info(
-                        "Stream %.1f fps, %.1f Mbps, p50 %.1f ms, p95 %.1f ms, dropped %d",
+                        "Stream %.1f fps, %.1f Mbps, p50 %.1f ms, p95 %.1f ms, dropped %d, encode %.0f/%.0f ms, send %.0f ms",
                         metrics["fps"],
                         metrics["bitrate_bps"] / 1_000_000,
                         metrics["latency_p50_ms"],
                         metrics["latency_p95_ms"],
                         metrics["dropped_frames"],
+                        encode_ms,
+                        encode_max,
+                        controller.sender.last_send_ms,
                     )
+                    encode_max = 0.0
                     last_metrics = time.monotonic()
         finally:
             if isinstance(encoder, FfmpegEncoder):

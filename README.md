@@ -51,6 +51,7 @@ port 24862. Reinstall the current app after pulling these client changes.
 
    The default driver name is `Virtual Display Driver` (MikeTheTech's driver).
    Use `--driver-name` if a different IddCx driver is installed.
+   Capture uses the desktop's BGRA buffer, so OpenCV is not required.
    Use `--monitor-index` if the virtual monitor is not Windows display index 1.
    H.264 is required by default for stable 60 fps. JPEG quality defaults to 40
    only when using the fallback; increase it if image

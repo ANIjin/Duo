@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 import statistics
@@ -15,17 +16,23 @@ class Telemetry:
     bytes_sent: int = 0
     dropped_frames: int = 0
     latencies_ms: list[float] = field(default_factory=list)
+    _recent_frames: deque[float] = field(default_factory=deque)
     _lock: Lock = field(default_factory=Lock)
 
     def record_frame(self, size: int, capture_timestamp_ns: int, now_ns: int | None = None) -> None:
         current = time.monotonic_ns() if now_ns is None else now_ns
         latency = max(0.0, (current - capture_timestamp_ns) / 1_000_000)
+        now = time.monotonic()
         with self._lock:
             self.frames += 1
             self.bytes_sent += size
             self.latencies_ms.append(latency)
             if len(self.latencies_ms) > 10_000:
                 del self.latencies_ms[:1_000]
+            self._recent_frames.append(now)
+            cutoff = now - 2.0
+            while self._recent_frames and self._recent_frames[0] < cutoff:
+                self._recent_frames.popleft()
 
     def snapshot(self) -> dict[str, float | int]:
         with self._lock:
@@ -33,11 +40,16 @@ class Telemetry:
             frames = self.frames
             sent = self.bytes_sent
             dropped = self.dropped_frames
+            recent = list(self._recent_frames)
         p50 = statistics.quantiles(values, n=100)[49] if len(values) >= 2 else (values[0] if values else 0.0)
         p95 = statistics.quantiles(values, n=100)[94] if len(values) >= 2 else (values[0] if values else 0.0)
         elapsed = max(time.monotonic() - self.started_at, 0.001)
+        if len(recent) >= 2 and recent[-1] > recent[0]:
+            fps = (len(recent) - 1) / (recent[-1] - recent[0])
+        else:
+            fps = frames / elapsed
         return {
-            "fps": frames / elapsed,
+            "fps": fps,
             "bitrate_bps": sent * 8 / elapsed,
             "dropped_frames": dropped,
             "latency_p50_ms": p50,

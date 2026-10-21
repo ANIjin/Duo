@@ -22,6 +22,7 @@ class FrameSender:
         self._last_sent_at = 0.0
         self._timestamp: int | None = None
         self.refresh_interval = 2.0
+        self.last_send_ms = 0.0
         self._stop = Event()
         self._wake = Event()
         self._done = Event()
@@ -86,7 +87,9 @@ class FrameSender:
         timestamp = time.monotonic_ns() if capture_timestamp_ns is None else capture_timestamp_ns
         flags = FRAME_FLAG_KEYFRAME if encoded.keyframe else 0
         payload = VideoFrame(timestamp, encoded.data).encode()
+        started = time.perf_counter()
         self.transport.send(encode_frame(Frame(FrameType.FRAME, flags, payload)))
+        self.last_send_ms = (time.perf_counter() - started) * 1000
         self._last_sent_at = time.monotonic()
         self.telemetry.record_frame(len(encoded.data), timestamp)
         return True
