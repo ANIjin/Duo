@@ -1,6 +1,7 @@
 # Duo
 
-Duo is an experimental wired USB second-display project for Windows and iPadOS.
+Duo is an experimental wired USB second-display project for Windows and iPadOS entirely built with artificial intelligence.
+This project was driven by the irritation caused by paywalls for simple python-based software that works natively on many devices outside the Apple ecosystem.
 
 ## Feasibility target
 
